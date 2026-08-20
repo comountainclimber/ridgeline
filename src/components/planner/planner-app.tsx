@@ -34,6 +34,7 @@ import {
   type LineString,
   type LngLat,
   type MapStyleId,
+  type SavedRoute,
   type Units,
   type Waypoint,
 } from "@/lib/geo/types";
@@ -171,10 +172,19 @@ export function PlannerApp({
   }, []);
 
   useEffect(() => {
-    const act = searchParams.get("activity");
-    if (act && (ACTIVITIES as readonly string[]).includes(act)) {
-      setActivity(act as Activity);
-    }
+    const forkId = searchParams.get("fork");
+    if (!forkId) return;
+    void fetch(`/api/routes/${forkId}`)
+      .then((r) => r.json())
+      .then((j) => {
+        const route = j.route as SavedRoute | undefined;
+        if (!route) return;
+        setName(`${route.name} (copy)`);
+        setActivity(route.activity);
+        setWaypoints(route.waypoints);
+        setGeometry(route.geometry);
+        if (route.geometry) void sampleElevations(route.geometry);
+      });
   }, [searchParams]);
 
   useEffect(() => {

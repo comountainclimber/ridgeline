@@ -70,7 +70,7 @@ export default function PublicRoutePage() {
           </p>
           <div className="mt-4 flex gap-2">
             <Button asChild>
-              <Link href="/plan">Open in planner</Link>
+              <Link href={`/plan?fork=${route.id}`}>Open in planner</Link>
             </Button>
             <Button variant="secondary" asChild>
               <a href={`/api/routes/${route.id}/gpx`}>Download GPX</a>

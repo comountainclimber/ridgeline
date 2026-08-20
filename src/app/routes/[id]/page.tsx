@@ -75,7 +75,7 @@ export default function RouteDetailPage() {
           </p>
           <div className="mt-4 flex gap-2">
             <Button asChild>
-              <Link href={`/plan`}>Open in planner</Link>
+              <Link href={`/plan?fork=${route.id}`}>Open in planner</Link>
             </Button>
             {isOwner && (
               <Button variant="secondary" asChild>
