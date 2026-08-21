@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Fraunces, Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { resolveAppUrl } from "@/lib/app-url";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,7 +27,7 @@ export const metadata: Metadata = {
     template: "%s · Ridgeline",
   },
   description: "Plan a line. Snap to the mountain. Mapping for mountain athletes.",
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
+  metadataBase: new URL(resolveAppUrl()),
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

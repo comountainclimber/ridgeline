@@ -12,6 +12,7 @@ Next.js · Vercel · Neon (schema `ridgeline`) · Mapbox
 cp .env.example .env.local
 # add NEXT_PUBLIC_MAPBOX_TOKEN, MAPBOX_SECRET_TOKEN, DATABASE_URL
 # add RESEND_API_KEY (and RESEND_FROM_EMAIL once the sending domain is verified)
+# production: NEXT_PUBLIC_APP_URL=https://ridgeline.highaltitude.solutions (magic-link emails)
 npm install
 npm run db:push
 npm run dev

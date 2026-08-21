@@ -13,6 +13,7 @@ import {
   normalizeEmail,
   safeNextPath,
 } from "@/lib/auth/token";
+import { resolveAppUrl } from "@/lib/app-url";
 import { requireDb } from "@/lib/db";
 import { magicLinks, routes, users } from "@/lib/db/schema";
 
@@ -52,8 +53,7 @@ export async function issueMagicLink(rawEmail: string, next?: string): Promise<{
     guestUserId,
   });
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  const url = new URL("/sign-in/verify", appUrl);
+  const url = new URL("/sign-in/verify", resolveAppUrl());
   url.searchParams.set("token", raw);
   if (nextPath !== "/routes") url.searchParams.set("next", nextPath);
   await sendMagicLinkEmail({ to: email, url: url.toString() });
