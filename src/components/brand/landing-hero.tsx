@@ -3,8 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { SessionNav } from "@/components/auth/session-nav";
-import { Wordmark } from "@/components/brand/wordmark";
+import { SiteHeader } from "@/components/brand/site-nav";
 import type { LineString } from "@/lib/geo/types";
 import {
   CRESTED_BUTTE,
@@ -63,28 +62,12 @@ export function LandingHero() {
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-[#07080A]/80 to-transparent"
       />
-      <header className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4 md:p-6">
-        <div className="glass rounded-2xl px-4 py-3">
-          <Wordmark />
-        </div>
-        <nav className="glass flex items-center gap-5 rounded-2xl px-4 py-3 text-sm text-[#C9D6E3]">
-          <Link href="/explore">Picks</Link>
-          <Link href="/routes">Library</Link>
-          <Link href="/merge">Merge</Link>
-          <SessionNav />
-          <Link
-            href="/plan"
-            className="rounded-full bg-[#E85D3A] px-4 py-2 text-[#F4F1EA]"
-          >
-            Open the planner
-          </Link>
-        </nav>
-      </header>
-      <div className="absolute inset-x-0 bottom-0 z-10 p-8 md:p-14">
+      <SiteHeader overlay />
+      <div className="absolute inset-x-0 bottom-0 z-10 p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:p-14">
         <p className="mb-3 text-xs uppercase tracking-[0.28em] text-[#7EB6D9]">
           Mapping for mountain athletes
         </p>
-        <h1 className="font-display max-w-3xl text-5xl italic leading-[0.95] text-[#F4F1EA] md:text-7xl">
+        <h1 className="font-display max-w-3xl text-4xl italic leading-[0.95] text-[#F4F1EA] sm:text-5xl md:text-7xl">
           Plan a line. Snap to the mountain.
         </h1>
         <p className="mt-5 max-w-xl text-[#C9D6E3]">

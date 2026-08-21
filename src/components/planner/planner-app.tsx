@@ -6,10 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Download,
   LocateFixed,
-  Redo2,
-  RotateCcw,
   Save,
-  Undo2,
   Upload,
   X,
 } from "lucide-react";
@@ -17,7 +14,18 @@ import { toast } from "sonner";
 import { Wordmark } from "@/components/brand/wordmark";
 import { MapCanvas, fitTrack } from "@/components/map/map-canvas";
 import { ElevationProfile } from "@/components/planner/elevation-profile";
+import {
+  DimensionToggle,
+  DrawModeToggle,
+  StyleToggle,
+} from "@/components/planner/map-toggles";
 import { PlaceSearch } from "@/components/planner/place-search";
+import {
+  PlannerMobileHeader,
+  PlannerMobileHud,
+  WaypointPanel,
+  type MobilePanel,
+} from "@/components/planner/planner-mobile";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseGpx } from "@/lib/geo/gpx-client";
@@ -105,6 +113,7 @@ export function PlannerApp({
   const [userName, setUserName] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
   const [userLocation, setUserLocation] = useState<LngLat | null>(null);
   const [locating, setLocating] = useState(false);
   const history = useRef<History[]>([]);
@@ -444,7 +453,11 @@ export function PlannerApp({
       }
       if (meta && e.key === "k") {
         e.preventDefault();
-        document.getElementById("place-search")?.focus();
+        if (window.matchMedia("(min-width: 1024px)").matches) {
+          document.getElementById("place-search")?.focus();
+        } else {
+          setMobilePanel("search");
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -579,10 +592,10 @@ export function PlannerApp({
         }}
       />
 
-      <header className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between p-4">
-        <div className="pointer-events-auto glass flex items-center gap-4 rounded-2xl px-4 py-3">
+      <header className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:p-4">
+        <div className="pointer-events-auto glass flex min-w-0 items-center gap-4 rounded-2xl px-4 py-3">
           <Wordmark />
-          <div className="hidden md:block">
+          <div className="hidden lg:block">
             <PlaceSearch
               proximity={userLocation}
               onSelect={(hit) => {
@@ -595,66 +608,10 @@ export function PlannerApp({
             />
           </div>
         </div>
-        <div className="pointer-events-auto glass flex items-center gap-1 rounded-2xl p-1.5">
-          {(["outdoors", "satellite", "winter"] as MapStyleId[]).map((id) => (
-            <button
-              key={id}
-              onClick={() => setStyleId(id)}
-              className={`rounded-xl px-3 py-1.5 text-xs capitalize ${styleId === id ? "bg-white/10 text-[#F4F1EA]" : "text-[#9AA8B5]"}`}
-            >
-              {id}
-            </button>
-          ))}
-          <div
-            role="radiogroup"
-            aria-label="Map dimension"
-            className="flex rounded-xl bg-black/25 p-0.5"
-          >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={!pitched}
-              onClick={() => setPitched(false)}
-              className={`rounded-lg px-3 py-1.5 text-xs ${!pitched ? "bg-white/10 text-[#F4F1EA]" : "text-[#9AA8B5]"}`}
-            >
-              2D
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={pitched}
-              onClick={() => setPitched(true)}
-              className={`rounded-lg px-3 py-1.5 text-xs ${pitched ? "bg-white/10 text-[#F4F1EA]" : "text-[#9AA8B5]"}`}
-            >
-              3D
-            </button>
-          </div>
-          <div
-            role="radiogroup"
-            aria-label="Draw mode"
-            className="flex rounded-xl bg-black/25 p-0.5"
-          >
-            <button
-              type="button"
-              role="radio"
-              aria-checked={drawMode === "trail"}
-              title="Snap to trails (B)"
-              onClick={() => setDrawMode("trail")}
-              className={`rounded-lg px-3 py-1.5 text-xs ${drawMode === "trail" ? "bg-white/10 text-[#F4F1EA]" : "text-[#9AA8B5]"}`}
-            >
-              Trail
-            </button>
-            <button
-              type="button"
-              role="radio"
-              aria-checked={drawMode === "bushwhack"}
-              title="Bushwhack — straight line off trail (B)"
-              onClick={() => setDrawMode("bushwhack")}
-              className={`rounded-lg px-3 py-1.5 text-xs ${drawMode === "bushwhack" ? "bg-white/10 text-[#F4F1EA]" : "text-[#9AA8B5]"}`}
-            >
-              Bushwhack
-            </button>
-          </div>
+        <div className="pointer-events-auto glass hidden items-center gap-1 rounded-2xl p-1.5 lg:flex">
+          <StyleToggle value={styleId} onChange={setStyleId} />
+          <DimensionToggle pitched={pitched} onChange={setPitched} />
+          <DrawModeToggle value={drawMode} onChange={setDrawMode} />
           <Button
             size="icon-sm"
             variant="ghost"
@@ -670,69 +627,108 @@ export function PlannerApp({
             {userEmail ?? userName ?? "Sign in"}
           </Link>
         </div>
+        <div className="lg:hidden">
+          <PlannerMobileHeader
+            panel={mobilePanel}
+            onPanelChange={setMobilePanel}
+            styleId={styleId}
+            onStyleId={setStyleId}
+            pitched={pitched}
+            onPitched={setPitched}
+            drawMode={drawMode}
+            onDrawMode={setDrawMode}
+            locating={locating}
+            userLocation={userLocation}
+            onLocate={() => locate()}
+            proximity={userLocation}
+            onSelectPlace={(hit) => {
+              mapHolder.current?.flyTo({
+                center: [hit.lng, hit.lat],
+                zoom: 13,
+                duration: 1100,
+              });
+            }}
+            accountHref={userEmail ? "/routes" : "/sign-in?next=/plan"}
+            accountLabel={userEmail ?? userName ?? "Sign in"}
+          />
+        </div>
       </header>
 
       <aside className="pointer-events-none absolute right-4 top-24 z-10 hidden w-64 lg:block">
         <div className="pointer-events-auto glass rounded-2xl p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs uppercase tracking-[0.18em] text-[#9AA8B5]">Waypoints</p>
-            <div className="flex gap-1">
-              <Button size="icon-xs" variant="ghost" onClick={undo} aria-label="Undo">
-                <Undo2 />
-              </Button>
-              <Button size="icon-xs" variant="ghost" onClick={redo} aria-label="Redo">
-                <Redo2 />
-              </Button>
-            </div>
-          </div>
-          <ol className="space-y-2 text-sm">
-            {waypoints.length === 0 && (
-              <li className="text-[#9AA8B5]">Click the mountain to start.</li>
-            )}
-            {waypoints.map((w) => (
-              <li key={w.id} className="flex justify-between gap-2 text-[#F4F1EA]">
-                <span>
-                  {w.label}
-                  {w.bushwhack && w.kind !== "start" ? (
-                    <span className="ml-1 text-[11px] text-[#9AA8B5]">off trail</span>
-                  ) : null}
-                </span>
-                <span className="text-[11px] text-[#9AA8B5]">
-                  {w.lat.toFixed(3)}, {w.lng.toFixed(3)}
-                </span>
-              </li>
-            ))}
-          </ol>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" onClick={reverse}>
-              Reverse
-            </Button>
-            <Button size="sm" variant="secondary" onClick={closeLoop}>
-              Close loop
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                pushHistory({
-                  waypoints: [],
-                  geometry: null,
-                  originalGeometry: null,
-                  snapParts: [],
-                  bushwhackParts: [],
-                });
-                setSamples([]);
-              }}
-            >
-              <RotateCcw className="size-3.5" />
-              Clear
-            </Button>
-          </div>
+          <WaypointPanel
+            waypoints={waypoints}
+            onUndo={undo}
+            onRedo={redo}
+            onReverse={reverse}
+            onCloseLoop={closeLoop}
+            onClear={() => {
+              pushHistory({
+                waypoints: [],
+                geometry: null,
+                originalGeometry: null,
+                snapParts: [],
+                bushwhackParts: [],
+              });
+              setSamples([]);
+            }}
+          />
         </div>
       </aside>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 p-3 md:p-4">
-        <div className="pointer-events-auto glass mx-auto max-w-6xl rounded-2xl p-3 md:p-4">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 lg:hidden">
+        <PlannerMobileHud
+          panel={mobilePanel}
+          onPanelChange={setMobilePanel}
+          stats={stats}
+          units={units}
+          onUnits={() => {
+            const next = units === "imperial" ? "metric" : "imperial";
+            setUnits(next);
+            void fetch("/api/auth/session", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ units: next }),
+            });
+          }}
+          samples={samples}
+          hoverM={hoverM}
+          onHover={setHoverM}
+          routing={routing}
+          error={error}
+          drawMode={drawMode}
+          originalGeometry={originalGeometry}
+          showOriginal={showOriginal}
+          onToggleOriginal={() => setShowOriginal((v) => !v)}
+          onImport={() => {
+            setMobilePanel(null);
+            fileRef.current?.click();
+          }}
+          onExport={() => void exportGpx()}
+          onSave={() => {
+            setMobilePanel(null);
+            setSaveOpen(true);
+          }}
+          waypoints={waypoints}
+          onUndo={undo}
+          onRedo={redo}
+          onReverse={reverse}
+          onCloseLoop={closeLoop}
+          onClear={() => {
+            pushHistory({
+              waypoints: [],
+              geometry: null,
+              originalGeometry: null,
+              snapParts: [],
+              bushwhackParts: [],
+            });
+            setSamples([]);
+          }}
+        />
+      </div>
+
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 hidden p-4 lg:block">
+        <div className="pointer-events-auto glass mx-auto max-w-6xl rounded-2xl p-4">
           <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
             <div className="flex flex-wrap gap-6">
               <Stat label="Distance" value={formatDistance(stats.distanceM, units)} />
@@ -741,11 +737,11 @@ export function PlannerApp({
               <Stat label="High" value={formatElevation(stats.highM, units)} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {originalGeometry && (
+              {originalGeometry ? (
                 <Button size="sm" variant="secondary" onClick={() => setShowOriginal((v) => !v)}>
                   {showOriginal ? "Hide original" : "Show original"}
                 </Button>
-              )}
+              ) : null}
               <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()}>
                 <Upload className="size-3.5" />
                 Import GPX
@@ -803,8 +799,8 @@ export function PlannerApp({
       />
 
       {saveOpen && (
-        <div className="absolute inset-0 z-20 grid place-items-center bg-black/50 p-4">
-          <div className="glass w-full max-w-md rounded-2xl p-5">
+        <div className="absolute inset-0 z-30 grid place-items-center bg-black/50 p-4">
+          <div className="glass w-full max-w-md max-h-[min(90dvh,32rem)] overflow-y-auto rounded-2xl p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="font-display italic text-2xl">Save this line</h2>
               <button onClick={() => setSaveOpen(false)} aria-label="Close">

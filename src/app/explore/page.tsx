@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Wordmark } from "@/components/brand/wordmark";
+import { SiteHeader } from "@/components/brand/site-nav";
 import { formatDistance, formatVert } from "@/lib/geo/format";
 import type { SavedRoute } from "@/lib/geo/types";
 
@@ -17,15 +17,10 @@ export default function ExplorePage() {
 
   return (
     <div className="min-h-dvh bg-[#07080A] text-[#F4F1EA]">
-      <header className="flex items-center justify-between px-6 py-5">
-        <Wordmark />
-        <Link href="/plan" className="text-sm text-[#E85D3A]">
-          Open the planner
-        </Link>
-      </header>
-      <main className="mx-auto max-w-5xl px-6 pb-20">
+      <SiteHeader />
+      <main className="mx-auto max-w-5xl px-4 pb-20 md:px-6">
         <p className="text-xs uppercase tracking-[0.28em] text-[#7EB6D9]">Worldwide</p>
-        <h1 className="font-display italic text-5xl">Ridgeline Picks</h1>
+        <h1 className="font-display italic text-4xl md:text-5xl">Ridgeline Picks</h1>
         <p className="mt-3 max-w-xl text-[#C9D6E3]">
           Iconic lines. Open any of them, then make it yours.
         </p>

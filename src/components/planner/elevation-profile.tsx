@@ -1,26 +1,33 @@
 "use client";
 
+import type { PointerEvent } from "react";
 import type { ElevationSample, Units } from "@/lib/geo/types";
 import { formatElevation, formatGrade } from "@/lib/geo/format";
+import { cn } from "@/lib/utils";
 
 type Props = {
   samples: ElevationSample[];
   units: Units;
   hoverM: number | null;
   onHover: (distanceM: number | null) => void;
+  compact?: boolean;
 };
 
-export function ElevationProfile({ samples, units, hoverM, onHover }: Props) {
+export function ElevationProfile({ samples, units, hoverM, onHover, compact }: Props) {
+  const frame = compact ? "h-14" : "h-[88px]";
+
   if (samples.length < 2) {
     return (
-      <div className="flex h-[88px] items-center justify-center text-sm text-[#9AA8B5]">
-        Click the map to drop a start, then a second point — the profile will draw here.
+      <div className={cn("flex items-center justify-center px-1 text-[#9AA8B5]", frame, compact ? "text-center text-xs" : "text-sm")}>
+        {compact
+          ? "Tap the map to drop a start."
+          : "Click the map to drop a start, then a second point — the profile will draw here."}
       </div>
     );
   }
 
   const width = 640;
-  const height = 88;
+  const height = compact ? 56 : 88;
   const pad = 8;
   const minE = Math.min(...samples.map((s) => s.elevationM));
   const maxE = Math.max(...samples.map((s) => s.elevationM));
@@ -40,18 +47,34 @@ export function ElevationProfile({ samples, units, hoverM, onHover }: Props) {
   ) : null;
   const hx = hover ? pad + (hover.distanceM / maxD) * (width - pad * 2) : 0;
 
+  function distanceAt(e: PointerEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const t = (e.clientX - rect.left) / Math.max(rect.width, 1);
+    onHover(Math.max(0, Math.min(1, t)) * maxD);
+  }
+
   return (
     <div className="relative">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-[88px] w-full"
+        className={cn("w-full touch-none", frame)}
         role="img"
         aria-label="Elevation profile"
-        onMouseLeave={() => onHover(null)}
-        onMouseMove={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          const t = (e.clientX - rect.left) / rect.width;
-          onHover(t * maxD);
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          distanceAt(e);
+        }}
+        onPointerMove={(e) => {
+          if (e.pointerType === "mouse" || e.currentTarget.hasPointerCapture(e.pointerId)) {
+            distanceAt(e);
+          }
+        }}
+        onPointerUp={(e) => {
+          if (e.pointerType !== "mouse") onHover(null);
+        }}
+        onPointerCancel={() => onHover(null)}
+        onPointerLeave={(e) => {
+          if (e.pointerType === "mouse") onHover(null);
         }}
         onKeyDown={(e) => {
           if (hoverM == null) {
@@ -66,7 +89,7 @@ export function ElevationProfile({ samples, units, hoverM, onHover }: Props) {
       >
         <path d={`${d} L${width - pad},${height - pad} L${pad},${height - pad} Z`} fill="rgba(232,93,58,0.16)" />
         <path d={d} fill="none" stroke="#E85D3A" strokeWidth="2.2" />
-        {hover && (
+        {hover ? (
           <>
             <line x1={hx} x2={hx} y1={pad} y2={height - pad} stroke="#F4F1EA" strokeOpacity="0.45" />
             <circle
@@ -80,13 +103,13 @@ export function ElevationProfile({ samples, units, hoverM, onHover }: Props) {
               fill="#F4F1EA"
             />
           </>
-        )}
+        ) : null}
       </svg>
-      {hover && (
+      {hover ? (
         <div className="pointer-events-none absolute right-3 top-2 text-[11px] tracking-wide text-[#C9D6E3]">
           {formatElevation(hover.elevationM, units)} · {formatGrade(hover.grade)}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

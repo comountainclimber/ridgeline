@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Wordmark } from "@/components/brand/wordmark";
+import { SiteHeader } from "@/components/brand/site-nav";
 import { Button } from "@/components/ui/button";
 import { formatDistance, formatVert } from "@/lib/geo/format";
 import type { SavedRoute } from "@/lib/geo/types";
@@ -49,35 +49,26 @@ export default function RouteDetailPage() {
         interactive={false}
         fitToTrack
       />
-      <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4">
-        <div className="glass rounded-2xl px-4 py-3">
-          <Wordmark />
-        </div>
-        <div className="glass flex gap-2 rounded-2xl p-2">
-          <Link href="/routes" className="px-3 py-1 text-sm text-[#C9D6E3]">
-            Library
-          </Link>
-          <a href={`/api/routes/${route.id}/gpx`} className="px-3 py-1 text-sm text-[#C9D6E3]">
-            Download GPX
-          </a>
-        </div>
-      </div>
-      <div className="absolute bottom-4 left-4 right-4 z-10 mx-auto max-w-3xl">
-        <div className="glass rounded-2xl p-5">
-          <h1 className="font-display italic text-3xl">{route.name}</h1>
+      <SiteHeader overlay />
+      <div className="absolute inset-x-0 bottom-0 z-10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-4">
+        <div className="glass mx-auto max-w-3xl rounded-2xl p-4 md:p-5">
+          <h1 className="font-display italic text-2xl md:text-3xl">{route.name}</h1>
           <p className="mt-2 text-[#C9D6E3]">
             {formatDistance(route.stats.distanceM, "imperial")} ·{" "}
             {formatVert(route.stats.gainM, "imperial")} vert
           </p>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             <Button asChild>
               <Link href={`/plan?fork=${route.id}`}>Open in planner</Link>
             </Button>
-            {isOwner && (
+            <Button variant="secondary" asChild>
+              <a href={`/api/routes/${route.id}/gpx`}>Download GPX</a>
+            </Button>
+            {isOwner ? (
               <Button variant="secondary" asChild>
                 <Link href={`/r/${route.id}`}>Public link</Link>
               </Button>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

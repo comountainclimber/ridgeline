@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Fraunces, Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
@@ -28,6 +28,11 @@ export const metadata: Metadata = {
   },
   description: "Plan a line. Snap to the mountain. Mapping for mountain athletes.",
   metadataBase: new URL(resolveAppUrl()),
+};
+
+export const viewport: Viewport = {
+  themeColor: "#07080A",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

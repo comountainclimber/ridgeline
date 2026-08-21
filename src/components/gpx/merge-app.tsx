@@ -1,13 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Upload, X } from "lucide-react";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
-import { Wordmark } from "@/components/brand/wordmark";
+import { SiteHeader } from "@/components/brand/site-nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDistance } from "@/lib/geo/format";
@@ -129,17 +128,9 @@ export function MergeApp() {
           if (geometryRef.current) fitGeometry(map, geometryRef.current);
         }}
       />
-      <header className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4">
-        <div className="glass rounded-2xl px-4 py-3">
-          <Wordmark />
-        </div>
-        <nav className="glass flex items-center gap-4 rounded-2xl px-4 py-3 text-sm text-[#C9D6E3]">
-          <Link href="/plan">Planner</Link>
-          <Link href="/routes">Library</Link>
-        </nav>
-      </header>
-      <div className="absolute inset-x-0 bottom-0 z-10 p-3 md:p-4">
-        <div className="glass mx-auto max-w-3xl rounded-2xl p-5">
+      <SiteHeader overlay />
+      <div className="absolute inset-x-0 bottom-0 z-10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-4">
+        <div className="glass mx-auto max-h-[min(70dvh,36rem)] max-w-3xl overflow-y-auto rounded-2xl p-4 md:p-5">
           <p className="text-xs uppercase tracking-[0.28em] text-[#7EB6D9]">Utility</p>
           <h1 className="font-display mt-1 italic text-3xl">Merge GPX</h1>
           <p className="mt-2 max-w-xl text-sm text-[#C9D6E3]">

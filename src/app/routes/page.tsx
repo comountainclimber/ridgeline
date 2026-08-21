@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { SessionNav } from "@/components/auth/session-nav";
-import { Wordmark } from "@/components/brand/wordmark";
+import { SiteHeader } from "@/components/brand/site-nav";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatDistance, formatVert } from "@/lib/geo/format";
@@ -32,16 +31,8 @@ export default function RoutesPage() {
 
   return (
     <div className="min-h-dvh bg-[#07080A] text-[#F4F1EA]">
-      <header className="flex items-center justify-between px-6 py-5">
-        <Wordmark />
-        <nav className="flex items-center gap-4 text-sm text-[#C9D6E3]">
-          <Link href="/plan">Planner</Link>
-          <Link href="/explore">Picks</Link>
-          <Link href="/merge">Merge</Link>
-          <SessionNav />
-        </nav>
-      </header>
-      <main className="mx-auto max-w-5xl px-6 pb-20">
+      <SiteHeader />
+      <main className="mx-auto max-w-5xl px-4 pb-20 md:px-6">
         <h1 className="font-display italic text-4xl">Your lines</h1>
         <div className="mt-6 flex flex-wrap gap-3">
           <Input

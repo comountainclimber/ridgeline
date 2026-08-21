@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Wordmark } from "@/components/brand/wordmark";
+import { SiteHeader } from "@/components/brand/site-nav";
 import { Button } from "@/components/ui/button";
 import { formatDistance, formatVert } from "@/lib/geo/format";
 import type { SavedRoute } from "@/lib/geo/types";
@@ -54,16 +54,14 @@ export default function PublicRoutePage() {
         interactive={false}
         fitToTrack
       />
-      <div className="absolute left-4 top-4 z-10 glass rounded-2xl px-4 py-3">
-        <Wordmark />
-      </div>
-      <div className="absolute bottom-4 left-4 right-4 z-10 mx-auto max-w-2xl">
-        <div className="glass rounded-2xl p-5">
-          <h1 className="font-display italic text-3xl">{route.name}</h1>
+      <SiteHeader overlay />
+      <div className="absolute inset-x-0 bottom-0 z-10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-4">
+        <div className="glass mx-auto max-w-2xl rounded-2xl p-4 md:p-5">
+          <h1 className="font-display italic text-2xl md:text-3xl">{route.name}</h1>
           <p className="mt-2 text-[#C9D6E3]">
             {formatDistance(route.stats.distanceM, "imperial")} · {formatVert(route.stats.gainM, "imperial")} vert
           </p>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             <Button asChild>
               <Link href={`/plan?fork=${route.id}`}>Open in planner</Link>
             </Button>

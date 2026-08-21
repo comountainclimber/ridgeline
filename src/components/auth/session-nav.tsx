@@ -9,7 +9,11 @@ type SessionUser = {
   displayName: string | null;
 };
 
-export function SessionNav() {
+export function SessionNav({
+  variant = "inline",
+}: {
+  variant?: "inline" | "menu";
+}) {
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
 
@@ -24,6 +28,31 @@ export function SessionNav() {
     await fetch("/api/auth/session", { method: "DELETE" });
     setUser(null);
     router.refresh();
+  }
+
+  if (variant === "menu") {
+    if (user?.email) {
+      return (
+        <div className="space-y-1">
+          <p className="truncate px-3 text-sm text-[#9AA8B5]">{user.email}</p>
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-base text-[#C9D6E3]"
+          >
+            Sign out
+          </button>
+        </div>
+      );
+    }
+    return (
+      <Link
+        href="/sign-in"
+        className="flex min-h-11 items-center rounded-xl px-3 text-base text-[#F4F1EA]"
+      >
+        Sign in
+      </Link>
+    );
   }
 
   if (user?.email) {
