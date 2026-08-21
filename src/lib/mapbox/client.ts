@@ -1,4 +1,5 @@
 import type { LineString, LngLat, MapboxProfile } from "@/lib/geo/types";
+import { toGeocodeHits, type GeocodeFeature, type GeocodeHit } from "@/lib/mapbox/geocode";
 
 const BASE = "https://api.mapbox.com";
 
@@ -89,22 +90,29 @@ export async function matchTrack(
   };
 }
 
-export async function geocode(query: string): Promise<
-  { name: string; lng: number; lat: number }[]
-> {
-  const url = `${BASE}/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?limit=5&types=place,poi,locality,region,mountain&access_token=${token()}`;
+export async function geocode(
+  query: string,
+  proximity?: LngLat | null,
+): Promise<GeocodeHit[]> {
+  const params = new URLSearchParams({
+    autocomplete: "true",
+    limit: "6",
+    // Mapbox v5 types — `mountain` is invalid and makes the request return 400.
+    types: "poi,place,locality,neighborhood,region",
+    access_token: token(),
+  });
+  if (
+    proximity &&
+    Number.isFinite(proximity[0]) &&
+    Number.isFinite(proximity[1])
+  ) {
+    params.set("proximity", `${proximity[0]},${proximity[1]}`);
+  }
+  const url = `${BASE}/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) return [];
-  const json = (await res.json()) as {
-    features?: { place_name?: string; center?: [number, number] }[];
-  };
-  return (json.features ?? [])
-    .filter((f) => f.center)
-    .map((f) => ({
-      name: f.place_name ?? "Place",
-      lng: f.center![0],
-      lat: f.center![1],
-    }));
+  const json = (await res.json()) as { features?: GeocodeFeature[] };
+  return toGeocodeHits(json.features);
 }
 
 function chunkCoords(coords: LngLat[], size: number): LngLat[][] {

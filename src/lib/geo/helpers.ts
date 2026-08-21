@@ -1,7 +1,9 @@
 import { nanoid } from "nanoid";
-import type { Activity, LineString, RouteStats, SavedRoute, Waypoint } from "@/lib/geo/types";
-import { ACTIVITIES } from "@/lib/geo/types";
+import type { LineString, RouteStats, SavedRoute, Waypoint } from "@/lib/geo/types";
 import { bboxOf } from "@/lib/geo/stats";
+
+/** Leftover NOT NULL column; tracks are not sport-typed. */
+export const DEFAULT_ROUTE_ACTIVITY = "hike";
 
 export function emptyStats(): RouteStats {
   return {
@@ -37,16 +39,11 @@ export function relabelWaypoints(points: Waypoint[]): Waypoint[] {
   }));
 }
 
-export function isActivity(value: string): value is Activity {
-  return (ACTIVITIES as readonly string[]).includes(value);
-}
-
 export function routePayload(row: {
   id: string;
   ownerId: string | null;
   name: string;
   description: string | null;
-  activity: string;
   visibility: string;
   geometry: unknown;
   waypoints: unknown;
@@ -67,7 +64,6 @@ export function routePayload(row: {
     ownerId: row.ownerId,
     name: row.name,
     description: row.description,
-    activity: isActivity(row.activity) ? row.activity : "hike",
     visibility: row.visibility === "public" ? "public" : "private",
     geometry: row.geometry as LineString,
     originalGeometry: (row.originalGeometry as LineString | null) ?? null,

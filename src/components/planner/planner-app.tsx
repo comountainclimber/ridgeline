@@ -6,30 +6,33 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Download,
   LocateFixed,
-  Mountain,
   Redo2,
   RotateCcw,
   Save,
-  Search,
   Undo2,
   Upload,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Wordmark } from "@/components/brand/wordmark";
-import { MapCanvas } from "@/components/map/map-canvas";
+import { MapCanvas, fitTrack } from "@/components/map/map-canvas";
 import { ElevationProfile } from "@/components/planner/elevation-profile";
+import { PlaceSearch } from "@/components/planner/place-search";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseGpx } from "@/lib/geo/gpx-client";
 import { toGpx } from "@/lib/geo/gpx";
-import { formatDistance, formatDuration, formatElevation, formatVert } from "@/lib/geo/format";
-import { densify, pointAlong, samplesFromElevations, statsFromSamples } from "@/lib/geo/stats";
+import { clearGpxImport, readGpxImport } from "@/lib/geo/gpx-merge";
+import { formatDistance, formatElevation, formatVert } from "@/lib/geo/format";
+import {
+  ELEVATION_SAMPLE_M,
+  densify,
+  pointAlong,
+  prepareElevationSamples,
+  statsFromSamples,
+} from "@/lib/geo/stats";
 import { makeWaypoint, relabelWaypoints } from "@/lib/geo/helpers";
 import {
-  ACTIVITIES,
-  ACTIVITY_META,
-  type Activity,
   type ElevationSample,
   type LineString,
   type LngLat,
@@ -48,22 +51,21 @@ type History = {
 };
 
 export function PlannerApp({
-  initialActivity = "hike",
   fork,
 }: {
-  initialActivity?: Activity;
   fork?: {
     name: string;
-    activity: Activity;
     waypoints: Waypoint[];
     geometry: LineString | null;
   };
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [activity, setActivity] = useState<Activity>(fork?.activity ?? initialActivity);
   const [styleId, setStyleId] = useState<MapStyleId>("outdoors");
-  const [pitched, setPitched] = useState(true);
+  const [pitched, setPitched] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem("ridgeline-dimension") !== "2d";
+  });
   const [waypoints, setWaypoints] = useState<Waypoint[]>(fork?.waypoints ?? []);
   const [geometry, setGeometry] = useState<LineString | null>(fork?.geometry ?? null);
   const [originalGeometry, setOriginalGeometry] = useState<LineString | null>(null);
@@ -74,18 +76,24 @@ export function PlannerApp({
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState(fork?.name ?? "Untitled line");
   const [units, setUnits] = useState<Units>("imperial");
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<{ name: string; lng: number; lat: number }[]>([]);
-  const [weather, setWeather] = useState<{ tempF: number | null; windMph: number | null } | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [saveOpen, setSaveOpen] = useState(false);
-  const [center, setCenter] = useState<LngLat>([6.8694, 45.9237]);
+  const [userLocation, setUserLocation] = useState<LngLat | null>(null);
+  const [locating, setLocating] = useState(false);
   const history = useRef<History[]>([]);
   const future = useRef<History[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const mapHolder = useRef<import("mapbox-gl").Map | null>(null);
+  const pendingFly = useRef<LngLat | null>(null);
+  const pendingFit = useRef<LineString | null>(null);
+  const watchId = useRef<number | null>(null);
+  const didAutoLocate = useRef(false);
+  const importGeometryRef = useRef<(trackName: string, original: LineString) => Promise<void>>(
+    async () => undefined,
+  );
 
-  const stats = useMemo(() => statsFromSamples(samples, activity), [samples, activity]);
+  const stats = useMemo(() => statsFromSamples(samples), [samples]);
   const puck = hoverM != null && geometry ? pointAlong(geometry.coordinates, hoverM) : null;
 
   const pushHistory = useCallback((next: History) => {
@@ -115,7 +123,6 @@ export function PlannerApp({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            activity,
             waypoints: pts.map((p) => ({ lng: p.lng, lat: p.lat })),
           }),
         });
@@ -125,50 +132,85 @@ export function PlannerApp({
         setGeometry(geo);
         if (original !== undefined) setOriginalGeometry(original);
         await sampleElevations(geo);
-        const mid = geo.coordinates[Math.floor(geo.coordinates.length / 2)];
-        if (mid) loadWeather(mid[1], mid[0]);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Routing failed");
       } finally {
         setRouting(false);
       }
     },
-    [activity],
+    [],
   );
 
   async function sampleElevations(geo: LineString) {
-    const dense = densify(geo.coordinates, 30);
-    const map = mapHolder.current;
-    let elevations: (number | null)[] = dense.map((c) => {
-      if (!map) return null;
-      const ele = map.queryTerrainElevation({ lng: c[0], lat: c[1] } as never);
-      return typeof ele === "number" ? ele : null;
+    const dense = densify(geo.coordinates, ELEVATION_SAMPLE_M);
+    const res = await fetch("/api/map/elevation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coordinates: dense }),
     });
-    if (elevations.every((e) => e == null)) {
-      const res = await fetch("/api/map/elevation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ coordinates: dense }),
-      });
-      const json = await res.json();
-      elevations = json.elevations ?? elevations;
-    }
-    setSamples(samplesFromElevations(dense, elevations));
+    const json = await res.json().catch(() => ({}));
+    const elevations = (json.elevations ?? []) as (number | null)[];
+    setSamples(prepareElevationSamples(dense, elevations));
   }
+
+  const pinAndFly = useCallback((lng: number, lat: number) => {
+    const next: LngLat = [lng, lat];
+    setUserLocation(next);
+    const map = mapHolder.current;
+    if (!map) {
+      pendingFly.current = next;
+      return;
+    }
+    flyMapTo(map, next);
+  }, []);
+
+  const locate = useCallback((opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false;
+    if (!navigator.geolocation) {
+      if (!silent) toast.error("Location isn’t available in this browser.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        pinAndFly(pos.coords.longitude, pos.coords.latitude);
+        if (watchId.current == null) {
+          watchId.current = navigator.geolocation.watchPosition(
+            (next) => {
+              setUserLocation([next.coords.longitude, next.coords.latitude]);
+            },
+            () => undefined,
+            { enableHighAccuracy: true, maximumAge: 4000 },
+          );
+        }
+      },
+      (err) => {
+        setLocating(false);
+        if (silent) return;
+        if (err.code === err.PERMISSION_DENIED) {
+          toast.error("Location permission is off — enable it to pin yourself on the map.");
+          return;
+        }
+        if (err.code === err.TIMEOUT) {
+          toast.error("Couldn’t fix your position. Try again with a clearer view of the sky.");
+          return;
+        }
+        toast.error("Couldn’t find your location.");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 8000 },
+    );
+  }, [pinAndFly]);
 
   useEffect(() => {
     fetch("/api/auth/session")
       .then((r) => r.json())
       .then((j) => {
         if (j.user?.displayName) setUserName(j.user.displayName);
+        if (j.user?.email) setUserEmail(j.user.email);
         if (j.user?.units) setUnits(j.user.units);
       })
       .catch(() => undefined);
-    navigator.geolocation?.getCurrentPosition(
-      (pos) => setCenter([pos.coords.longitude, pos.coords.latitude]),
-      () => undefined,
-      { enableHighAccuracy: true, timeout: 4000 },
-    );
   }, []);
 
   useEffect(() => {
@@ -180,47 +222,95 @@ export function PlannerApp({
         const route = j.route as SavedRoute | undefined;
         if (!route) return;
         setName(`${route.name} (copy)`);
-        setActivity(route.activity);
         setWaypoints(route.waypoints);
         setGeometry(route.geometry);
-        if (route.geometry) void sampleElevations(route.geometry);
+        if (route.geometry) {
+          const map = mapHolder.current;
+          if (map) fitTrack(map, route.geometry, { pitched });
+          else pendingFit.current = route.geometry;
+          void sampleElevations(route.geometry);
+        }
       });
   }, [searchParams]);
 
   useEffect(() => {
+    if (fork || searchParams.get("fork")) return;
+    const imported = readGpxImport();
+    if (imported) {
+      didAutoLocate.current = true;
+      void importGeometryRef.current(imported.name, imported.geometry).finally(() => {
+        clearGpxImport();
+      });
+      return;
+    }
     const raw = sessionStorage.getItem(DRAFT_KEY);
-    if (raw && !fork) {
+    if (raw) {
       try {
         const draft = JSON.parse(raw);
         if (draft.waypoints) setWaypoints(draft.waypoints);
         if (draft.geometry) setGeometry(draft.geometry);
         if (draft.name) setName(draft.name);
-        if (draft.activity) setActivity(draft.activity);
       } catch {
         /* ignore */
       }
     }
-  }, [fork]);
+  }, [fork, searchParams]);
 
   useEffect(() => {
-    if (center[0] === 6.8694 && center[1] === 45.9237) return;
-    mapHolder.current?.flyTo({ center, zoom: 11.8, duration: 1400 });
-  }, [center]);
+    if (didAutoLocate.current) return;
+    if (fork || searchParams.get("fork") || readGpxImport()) {
+      didAutoLocate.current = true;
+      return;
+    }
+    try {
+      const raw = sessionStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        const draft = JSON.parse(raw) as { waypoints?: unknown[]; geometry?: unknown };
+        if ((Array.isArray(draft.waypoints) && draft.waypoints.length > 0) || draft.geometry) {
+          didAutoLocate.current = true;
+          return;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    didAutoLocate.current = true;
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        pinAndFly(pos.coords.longitude, pos.coords.latitude);
+        if (watchId.current != null) return;
+        watchId.current = navigator.geolocation.watchPosition(
+          (next) => {
+            setUserLocation([next.coords.longitude, next.coords.latitude]);
+          },
+          () => undefined,
+          { enableHighAccuracy: true, maximumAge: 4000 },
+        );
+      },
+      () => undefined,
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 8000 },
+    );
+  }, [fork, searchParams, pinAndFly]);
+
+  useEffect(() => {
+    return () => {
+      if (watchId.current != null) {
+        navigator.geolocation.clearWatch(watchId.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     sessionStorage.setItem(
       DRAFT_KEY,
-      JSON.stringify({ name, activity, waypoints, geometry }),
+      JSON.stringify({ name, waypoints, geometry }),
     );
-  }, [name, activity, waypoints, geometry]);
+  }, [name, waypoints, geometry]);
 
   useEffect(() => {
-    if (waypoints.length >= 2) {
-      void routeWaypoints(waypoints);
-    }
-    // activity change re-snaps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activity]);
+    window.localStorage.setItem("ridgeline-dimension", pitched ? "3d" : "2d");
+  }, [pitched]);
 
   const addPoint = (lng: number, lat: number) => {
     const kind = waypoints.length === 0 ? "start" : "end";
@@ -270,7 +360,6 @@ export function PlannerApp({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
-      if (e.key === "Escape") setResults([]);
       if (e.key === "Backspace" && !(e.target instanceof HTMLInputElement)) {
         e.preventDefault();
         const next = waypoints.slice(0, -1);
@@ -294,9 +383,6 @@ export function PlannerApp({
         e.preventDefault();
         document.getElementById("place-search")?.focus();
       }
-      if (!meta && ["1", "2", "3", "4"].includes(e.key) && !(e.target instanceof HTMLInputElement)) {
-        setActivity(ACTIVITIES[Number(e.key) - 1]);
-      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -309,7 +395,6 @@ export function PlannerApp({
     }
     const xml = toGpx({
       name,
-      activity,
       coordinates: geometry.coordinates,
       elevations: samples.map((s) => s.elevationM),
     });
@@ -322,19 +407,20 @@ export function PlannerApp({
     URL.revokeObjectURL(url);
   }
 
-  async function onImport(file: File) {
-    const text = await file.text();
+  async function importGeometry(trackName: string, original: LineString) {
+    setName(trackName);
+    setOriginalGeometry(original);
+    setShowOriginal(true);
+    setRouting(true);
+    setError(null);
+    const map = mapHolder.current;
+    if (map) fitTrack(map, original, { pitched });
+    else pendingFit.current = original;
     try {
-      const parsed = parseGpx(text);
-      setName(parsed.name ?? file.name.replace(/\.gpx$/i, ""));
-      const original = parsed.geometry;
-      setOriginalGeometry(original);
-      setShowOriginal(true);
-      setRouting(true);
       const res = await fetch("/api/map/match", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ activity, coordinates: original.coordinates }),
+        body: JSON.stringify({ coordinates: original.coordinates }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -360,6 +446,17 @@ export function PlannerApp({
       setRouting(false);
     }
   }
+  importGeometryRef.current = importGeometry;
+
+  async function onImport(file: File) {
+    const text = await file.text();
+    try {
+      const parsed = parseGpx(text);
+      await importGeometry(parsed.name ?? file.name.replace(/\.gpx$/i, ""), parsed.geometry);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not read that GPX.");
+    }
+  }
 
   async function saveRoute() {
     if (!geometry) {
@@ -371,7 +468,6 @@ export function PlannerApp({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name,
-        activity,
         geometry,
         originalGeometry,
         waypoints,
@@ -388,38 +484,9 @@ export function PlannerApp({
     router.push(`/routes/${json.route.id}`);
   }
 
-  async function searchPlaces(value: string) {
-    setQuery(value);
-    if (value.trim().length < 2) {
-      setResults([]);
-      return;
-    }
-    const res = await fetch(`/api/map/geocode?q=${encodeURIComponent(value)}`);
-    const json = await res.json();
-    setResults(json.results ?? []);
-  }
-
-  function loadWeather(lat: number, lng: number) {
-    fetch(`/api/map/weather?lat=${lat}&lng=${lng}`)
-      .then((r) => r.json())
-      .then(setWeather)
-      .catch(() => undefined);
-  }
-
-  function locate() {
-    navigator.geolocation?.getCurrentPosition((pos) => {
-      mapHolder.current?.flyTo({
-        center: [pos.coords.longitude, pos.coords.latitude],
-        zoom: 13,
-        duration: 1200,
-      });
-    });
-  }
-
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-[#07080A]">
       <MapCanvas
-        activity={activity}
         styleId={styleId}
         pitched={pitched}
         geometry={geometry}
@@ -427,43 +494,36 @@ export function PlannerApp({
         showOriginal={showOriginal}
         waypoints={waypoints}
         puck={puck}
-        initialCenter={center}
+        userLocation={userLocation}
         onClickLngLat={addPoint}
         onWaypointMove={movePoint}
         onReady={(map) => {
           mapHolder.current = map;
+          if (pendingFit.current) {
+            fitTrack(map, pendingFit.current, { pitched });
+            pendingFit.current = null;
+            pendingFly.current = null;
+          } else if (pendingFly.current) {
+            flyMapTo(map, pendingFly.current);
+            pendingFly.current = null;
+          }
         }}
       />
 
       <header className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between p-4">
         <div className="pointer-events-auto glass flex items-center gap-4 rounded-2xl px-4 py-3">
           <Wordmark />
-          <div className="relative hidden md:block">
-            <Search className="absolute left-2.5 top-2.5 size-4 text-[#9AA8B5]" />
-            <Input
-              id="place-search"
-              value={query}
-              onChange={(e) => void searchPlaces(e.target.value)}
-              placeholder="Search a peak, town, trailhead"
-              className="h-9 w-72 border-white/10 bg-black/30 pl-8 text-[#F4F1EA]"
+          <div className="hidden md:block">
+            <PlaceSearch
+              proximity={userLocation}
+              onSelect={(hit) => {
+                mapHolder.current?.flyTo({
+                  center: [hit.lng, hit.lat],
+                  zoom: 13,
+                  duration: 1100,
+                });
+              }}
             />
-            {results.length > 0 && (
-              <div className="absolute mt-2 w-full overflow-hidden rounded-xl border border-white/10 bg-[#12151A] shadow-xl">
-                {results.map((r) => (
-                  <button
-                    key={`${r.lng}-${r.lat}`}
-                    className="block w-full px-3 py-2 text-left text-sm text-[#C9D6E3] hover:bg-white/5"
-                    onClick={() => {
-                      mapHolder.current?.flyTo({ center: [r.lng, r.lat], zoom: 13, duration: 1100 });
-                      setResults([]);
-                      setQuery(r.name);
-                    }}
-                  >
-                    {r.name}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         </div>
         <div className="pointer-events-auto glass flex items-center gap-1 rounded-2xl p-1.5">
@@ -476,45 +536,46 @@ export function PlannerApp({
               {id}
             </button>
           ))}
-          <Button size="sm" variant="ghost" onClick={() => setPitched((v) => !v)}>
-            <Mountain className="size-4" />
-            3D
+          <div
+            role="radiogroup"
+            aria-label="Map dimension"
+            className="flex rounded-xl bg-black/25 p-0.5"
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={!pitched}
+              onClick={() => setPitched(false)}
+              className={`rounded-lg px-3 py-1.5 text-xs ${!pitched ? "bg-white/10 text-[#F4F1EA]" : "text-[#9AA8B5]"}`}
+            >
+              2D
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={pitched}
+              onClick={() => setPitched(true)}
+              className={`rounded-lg px-3 py-1.5 text-xs ${pitched ? "bg-white/10 text-[#F4F1EA]" : "text-[#9AA8B5]"}`}
+            >
+              3D
+            </button>
+          </div>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => locate()}
+            disabled={locating}
+            aria-label="Pin to my location"
+            aria-pressed={userLocation != null}
+            title="Pin to my location"
+          >
+            <LocateFixed className={`size-4 ${userLocation ? "text-[#7EB6D9]" : ""} ${locating ? "animate-pulse" : ""}`} />
           </Button>
-          <Button size="icon-sm" variant="ghost" onClick={locate} aria-label="Locate me">
-            <LocateFixed className="size-4" />
-          </Button>
-          <Link href="/sign-in" className="px-3 text-xs text-[#C9D6E3]">
-            {userName ?? "Sign in"}
+          <Link href={userEmail ? "/routes" : "/sign-in?next=/plan"} className="px-3 text-xs text-[#C9D6E3]">
+            {userEmail ?? userName ?? "Sign in"}
           </Link>
         </div>
       </header>
-
-      <div className="pointer-events-none absolute left-1/2 top-20 z-10 -translate-x-1/2">
-        <div
-          role="radiogroup"
-          aria-label="Activity"
-          className="pointer-events-auto glass flex rounded-2xl p-1"
-        >
-          {ACTIVITIES.map((a, i) => (
-            <button
-              key={a}
-              role="radio"
-              aria-checked={activity === a}
-              onClick={() => setActivity(a)}
-              className={`rounded-xl px-3 py-1.5 text-xs ${activity === a ? "text-[#07080A]" : "text-[#C9D6E3]"}`}
-              style={{ background: activity === a ? ACTIVITY_META[a].color : "transparent" }}
-            >
-              {ACTIVITY_META[a].label}
-              <span className="sr-only"> shortcut {i + 1}</span>
-            </button>
-          ))}
-        </div>
-        {activity === "ski" && (
-          <p className="mt-2 text-center text-[11px] text-[#C9D6E3]/80">
-            Ski snaps to the path network — not a dedicated piste graph.
-          </p>
-        )}
-      </div>
 
       <aside className="pointer-events-none absolute right-4 top-24 z-10 hidden w-64 lg:block">
         <div className="pointer-events-auto glass rounded-2xl p-4">
@@ -572,13 +633,6 @@ export function PlannerApp({
               <Stat label="Vert" value={formatVert(stats.gainM, units)} accent />
               <Stat label="Loss" value={formatVert(stats.lossM, units)} />
               <Stat label="High" value={formatElevation(stats.highM, units)} />
-              <Stat label="ETA" value={formatDuration(stats.etaS)} />
-              {weather?.tempF != null && (
-                <Stat
-                  label="Air"
-                  value={`${Math.round(weather.tempF)}° · ${Math.round(weather.windMph ?? 0)} mph`}
-                />
-              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {originalGeometry && (
@@ -589,6 +643,9 @@ export function PlannerApp({
               <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()}>
                 <Upload className="size-3.5" />
                 Import GPX
+              </Button>
+              <Button size="sm" variant="ghost" asChild>
+                <Link href="/merge">Merge</Link>
               </Button>
               <Button size="sm" variant="secondary" onClick={() => void exportGpx()}>
                 <Download className="size-3.5" />
@@ -616,7 +673,7 @@ export function PlannerApp({
           </div>
           <ElevationProfile samples={samples} units={units} hoverM={hoverM} onHover={setHoverM} />
           <p className="mt-1 text-[11px] text-[#9AA8B5]">
-            {routing ? "Snapping to trails…" : error ? error : ACTIVITY_META[activity].hint}
+            {routing ? "Snapping to trails…" : error ? error : "Snaps to trails and paths"}
           </p>
         </div>
       </div>
@@ -649,8 +706,18 @@ export function PlannerApp({
               placeholder="Name"
             />
             <p className="mb-4 text-sm text-[#9AA8B5]">
-              Signed in as {userName ?? "a new athlete"} — we&apos;ll create a library for you if needed.
+              {userEmail
+                ? `Saving to ${userEmail}.`
+                : "Saved on this device. Sign in to keep it across browsers."}
             </p>
+            {!userEmail && (
+              <Link
+                href="/sign-in?next=/plan"
+                className="mb-4 inline-block text-sm text-[#E85D3A]"
+              >
+                Sign in with email
+              </Link>
+            )}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setSaveOpen(false)}>
                 Cancel
@@ -681,4 +748,15 @@ function Stat({
       </p>
     </div>
   );
+}
+
+function flyMapTo(map: import("mapbox-gl").Map, center: LngLat) {
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const zoom = map.getZoom() < 12.5 ? 13.2 : map.getZoom();
+  map.flyTo({
+    center,
+    zoom,
+    duration: reduce ? 0 : 1400,
+    essential: true,
+  });
 }

@@ -11,7 +11,9 @@ Next.js · Vercel · Neon (schema `ridgeline`) · Mapbox
 ```bash
 cp .env.example .env.local
 # add NEXT_PUBLIC_MAPBOX_TOKEN, MAPBOX_SECRET_TOKEN, DATABASE_URL
+# add RESEND_API_KEY (and RESEND_FROM_EMAIL once the sending domain is verified)
 npm install
+npm run db:push
 npm run dev
 ```
 
@@ -23,3 +25,4 @@ npm run db:seed
 ```
 
 Never commit `.env.local`. The Mapbox secret token is server-only.
+Without `RESEND_API_KEY`, sign-in links print to the terminal in development.

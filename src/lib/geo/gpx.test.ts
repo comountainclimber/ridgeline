@@ -5,7 +5,6 @@ describe("gpx roundtrip", () => {
   it("writes and reads track points", () => {
     const xml = toGpx({
       name: "Test ridge",
-      activity: "hike",
       coordinates: [
         [-105.8, 39.63],
         [-105.81, 39.64],
@@ -16,5 +15,6 @@ describe("gpx roundtrip", () => {
     expect(parsed.name).toBe("Test ridge");
     expect(parsed.geometry.coordinates).toHaveLength(2);
     expect(parsed.geometry.coordinates[0][0]).toBeCloseTo(-105.8, 3);
+    expect(xml).not.toContain("<type>");
   });
 });

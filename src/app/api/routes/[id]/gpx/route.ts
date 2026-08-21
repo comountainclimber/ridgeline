@@ -4,7 +4,7 @@ import { getSessionUser } from "@/lib/auth/session";
 import { requireDb } from "@/lib/db";
 import { routes } from "@/lib/db/schema";
 import { toGpx } from "@/lib/geo/gpx";
-import type { Activity, LineString } from "@/lib/geo/types";
+import type { LineString } from "@/lib/geo/types";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -18,7 +18,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const geometry = row.geometry as LineString;
   const xml = toGpx({
     name: row.name,
-    activity: row.activity as Activity,
     coordinates: geometry.coordinates,
   });
   return new NextResponse(xml, {

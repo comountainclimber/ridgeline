@@ -3,8 +3,9 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { SessionNav } from "@/components/auth/session-nav";
 import { Wordmark } from "@/components/brand/wordmark";
-import { ACTIVITY_META, ACTIVITIES, type Activity, type LineString } from "@/lib/geo/types";
+import type { LineString } from "@/lib/geo/types";
 
 const MapCanvas = dynamic(
   () => import("@/components/map/map-canvas").then((m) => m.MapCanvas),
@@ -19,7 +20,6 @@ export function LandingHero() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        activity: "hike",
         waypoints: [
           { lng: 6.8694, lat: 45.9237 },
           { lng: 6.8875, lat: 45.9672 },
@@ -36,7 +36,6 @@ export function LandingHero() {
   return (
     <div className="relative h-dvh overflow-hidden bg-[#07080A]">
       <MapCanvas
-        activity="hike"
         styleId="outdoors"
         pitched
         geometry={geometry}
@@ -48,13 +47,23 @@ export function LandingHero() {
         initialCenter={[6.8694, 45.9237]}
         initialZoom={12.2}
       />
-      <div className="absolute inset-0 bg-gradient-to-t from-[#07080A] via-[#07080A]/20 to-transparent" />
-      <header className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-6">
-        <Wordmark />
-        <nav className="flex items-center gap-5 text-sm text-[#C9D6E3]">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#07080A] via-[#07080A]/20 to-transparent"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-[#07080A]/80 to-transparent"
+      />
+      <header className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4 md:p-6">
+        <div className="glass rounded-2xl px-4 py-3">
+          <Wordmark />
+        </div>
+        <nav className="glass flex items-center gap-5 rounded-2xl px-4 py-3 text-sm text-[#C9D6E3]">
           <Link href="/explore">Picks</Link>
           <Link href="/routes">Library</Link>
-          <Link href="/sign-in">Sign in</Link>
+          <Link href="/merge">Merge</Link>
+          <SessionNav />
           <Link
             href="/plan"
             className="rounded-full bg-[#E85D3A] px-4 py-2 text-[#F4F1EA]"
@@ -74,19 +83,7 @@ export function LandingHero() {
           Draw a route, snap it to real trails and roads, and read vert, miles, and grade
           before you leave the trailhead.
         </p>
-        <div className="mt-8 flex flex-wrap gap-2">
-          {ACTIVITIES.map((a: Activity) => (
-            <Link
-              key={a}
-              href={`/plan?activity=${a}`}
-              className="rounded-full border border-white/15 px-4 py-2 text-sm text-[#F4F1EA]"
-              style={{ boxShadow: `inset 0 0 0 1px ${ACTIVITY_META[a].color}33` }}
-            >
-              {ACTIVITY_META[a].label}
-            </Link>
-          ))}
-        </div>
-        <div className="mt-6 flex gap-4 text-sm">
+        <div className="mt-8 flex gap-4 text-sm">
           <Link href="/plan" className="text-[#E85D3A]">
             Open the planner
           </Link>
@@ -95,7 +92,6 @@ export function LandingHero() {
           </Link>
         </div>
         <p className="mt-10 max-w-lg text-[11px] leading-relaxed text-[#9AA8B5]">
-          Ski / split snaps to the walking path network — not a dedicated piste graph.
           Map data © Mapbox © OpenStreetMap.
         </p>
       </div>

@@ -4,7 +4,7 @@ import { getSessionUser, requireUser } from "@/lib/auth/session";
 import { requireDb } from "@/lib/db";
 import { routes } from "@/lib/db/schema";
 import { routeBbox, routePayload } from "@/lib/geo/helpers";
-import type { Activity, LineString } from "@/lib/geo/types";
+import type { LineString } from "@/lib/geo/types";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -41,7 +41,6 @@ export async function PATCH(req: NextRequest, { params }: Params) {
             : null
           : existing.description,
       visibility: body.visibility === "public" ? "public" : body.visibility === "private" ? "private" : existing.visibility,
-      activity: (body.activity as Activity) ?? existing.activity,
       geometry,
       waypoints: body.waypoints ?? existing.waypoints,
       originalGeometry: body.originalGeometry ?? existing.originalGeometry,

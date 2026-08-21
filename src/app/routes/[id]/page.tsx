@@ -6,8 +6,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Wordmark } from "@/components/brand/wordmark";
 import { Button } from "@/components/ui/button";
-import { formatDistance, formatDuration, formatVert } from "@/lib/geo/format";
-import { ACTIVITY_META } from "@/lib/geo/types";
+import { formatDistance, formatVert } from "@/lib/geo/format";
 import type { SavedRoute } from "@/lib/geo/types";
 
 const MapCanvas = dynamic(
@@ -40,7 +39,6 @@ export default function RouteDetailPage() {
   return (
     <div className="relative h-dvh bg-[#07080A]">
       <MapCanvas
-        activity={route.activity}
         styleId="outdoors"
         pitched
         geometry={route.geometry}
@@ -49,6 +47,7 @@ export default function RouteDetailPage() {
         waypoints={route.waypoints}
         puck={null}
         interactive={false}
+        fitToTrack
       />
       <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4">
         <div className="glass rounded-2xl px-4 py-3">
@@ -65,13 +64,10 @@ export default function RouteDetailPage() {
       </div>
       <div className="absolute bottom-4 left-4 right-4 z-10 mx-auto max-w-3xl">
         <div className="glass rounded-2xl p-5">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-[#9AA8B5]">
-            {ACTIVITY_META[route.activity].label}
-          </p>
           <h1 className="font-display italic text-3xl">{route.name}</h1>
           <p className="mt-2 text-[#C9D6E3]">
             {formatDistance(route.stats.distanceM, "imperial")} ·{" "}
-            {formatVert(route.stats.gainM, "imperial")} vert · ETA {formatDuration(route.stats.etaS)}
+            {formatVert(route.stats.gainM, "imperial")} vert
           </p>
           <div className="mt-4 flex gap-2">
             <Button asChild>

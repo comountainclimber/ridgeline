@@ -1,25 +1,21 @@
-import type { Activity, LineString, LngLat } from "./types";
+import type { LineString, LngLat } from "./types";
 
 export function toGpx(opts: {
   name: string;
-  activity: Activity;
   coordinates: LngLat[];
   elevations?: (number | null)[];
+  times?: (string | null)[];
+  desc?: string;
 }): string {
-  const type =
-    opts.activity === "mtb"
-      ? "Cycling"
-      : opts.activity === "ski"
-        ? "Skiing"
-        : opts.activity === "run"
-          ? "Running"
-          : "Hiking";
   const pts = opts.coordinates
     .map((c, i) => {
       const ele = opts.elevations?.[i];
       const eleTag =
         ele != null && Number.isFinite(ele) ? `<ele>${ele.toFixed(1)}</ele>` : "";
-      return `<trkpt lat="${c[1].toFixed(6)}" lon="${c[0].toFixed(6)}">${eleTag}</trkpt>`;
+      const time = opts.times?.[i];
+      const timeTag =
+        time && time.trim().length > 0 ? `<time>${escapeXml(time.trim())}</time>` : "";
+      return `<trkpt lat="${c[1].toFixed(6)}" lon="${c[0].toFixed(6)}">${eleTag}${timeTag}</trkpt>`;
     })
     .join("");
 
@@ -27,11 +23,10 @@ export function toGpx(opts: {
 <gpx version="1.1" creator="Ridgeline" xmlns="http://www.topografix.com/GPX/1/1">
   <metadata>
     <name>${escapeXml(opts.name)}</name>
-    <desc>Planned on Ridgeline</desc>
+    <desc>${escapeXml(opts.desc ?? "Planned on Ridgeline")}</desc>
   </metadata>
   <trk>
     <name>${escapeXml(opts.name)}</name>
-    <type>${type}</type>
     <trkseg>${pts}</trkseg>
   </trk>
 </gpx>`;

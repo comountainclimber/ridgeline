@@ -11,7 +11,8 @@ export const ridgeline = pgSchema("ridgeline");
 
 export const users = ridgeline.table("users", {
   id: text("id").primaryKey(),
-  clerkId: text("clerk_id").unique(),
+  email: text("email").unique(),
+  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   displayName: text("display_name"),
   units: text("units").notNull().default("imperial"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -50,6 +51,16 @@ export const routeWaypoints = ridgeline.table("route_waypoints", {
   lat: doublePrecision("lat").notNull(),
   label: text("label"),
   kind: text("kind").notNull().default("via"),
+});
+
+export const magicLinks = ridgeline.table("magic_links", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  guestUserId: text("guest_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const gpxAssets = ridgeline.table("gpx_assets", {

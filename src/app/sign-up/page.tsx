@@ -1,1 +1,1 @@
-export { default } from "../sign-in/page";
+export { default, metadata } from "../sign-in/page";

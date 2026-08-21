@@ -1,6 +1,3 @@
-export const ACTIVITIES = ["run", "hike", "ski", "mtb"] as const;
-export type Activity = (typeof ACTIVITIES)[number];
-
 export const UNITS = ["imperial", "metric"] as const;
 export type Units = (typeof UNITS)[number];
 
@@ -54,48 +51,15 @@ export type SnappedRoute = {
 
 export type MapboxProfile = "walking" | "cycling";
 
-export type MapStyleId = "outdoors" | "satellite" | "winter";
+export const SNAP_PROFILE: MapboxProfile = "walking";
 
-export const ACTIVITY_META: Record<
-  Activity,
-  { label: string; profile: MapboxProfile; color: string; glow: string; hint: string }
-> = {
-  run: {
-    label: "Trail run",
-    profile: "walking",
-    color: "#E85D3A",
-    glow: "rgba(232, 93, 58, 0.45)",
-    hint: "Snaps to footpaths and trails",
-  },
-  hike: {
-    label: "Hike",
-    profile: "walking",
-    color: "#C9D6E3",
-    glow: "rgba(201, 214, 227, 0.4)",
-    hint: "Snaps to hiking paths and approaches",
-  },
-  ski: {
-    label: "Ski / split",
-    profile: "walking",
-    color: "#7EB6D9",
-    glow: "rgba(126, 182, 217, 0.45)",
-    hint: "Snaps to the path network — not a ski-piste graph",
-  },
-  mtb: {
-    label: "MTB",
-    profile: "cycling",
-    color: "#8BAF7A",
-    glow: "rgba(139, 175, 122, 0.45)",
-    hint: "Snaps to bikeable trails and fire roads",
-  },
-};
+export type MapStyleId = "outdoors" | "satellite" | "winter";
 
 export type SavedRoute = {
   id: string;
   ownerId: string | null;
   name: string;
   description: string | null;
-  activity: Activity;
   visibility: Visibility;
   geometry: LineString;
   originalGeometry: LineString | null;
@@ -108,7 +72,6 @@ export type SavedRoute = {
 
 export type PlannerDraft = {
   name: string;
-  activity: Activity;
   waypoints: Waypoint[];
   geometry: LineString | null;
   originalGeometry: LineString | null;

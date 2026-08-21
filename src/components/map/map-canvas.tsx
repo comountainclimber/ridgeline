@@ -4,8 +4,9 @@ import { useEffect, useRef } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { LineString, LngLat, MapStyleId, Waypoint } from "@/lib/geo/types";
-import { ACTIVITY_META, type Activity } from "@/lib/geo/types";
+import { bboxOf } from "@/lib/geo/stats";
 import {
+  CHAMONIX,
   LAYER_ORIGINAL,
   LAYER_PUCK,
   LAYER_ROUTE_CORE,
@@ -16,12 +17,13 @@ import {
   SOURCE_ORIGINAL,
   SOURCE_PUCK,
   SOURCE_ROUTE,
+  TRACK_COLOR,
+  applyWinterBasemap,
 } from "@/lib/map/layers";
 
 const TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
 
 type Props = {
-  activity: Activity;
   styleId: MapStyleId;
   pitched: boolean;
   geometry: LineString | null;
@@ -29,6 +31,7 @@ type Props = {
   showOriginal: boolean;
   waypoints: Waypoint[];
   puck: LngLat | null;
+  userLocation?: LngLat | null;
   interactive?: boolean;
   onClickLngLat?: (lng: number, lat: number) => void;
   onWaypointMove?: (id: string, lng: number, lat: number) => void;
@@ -36,10 +39,11 @@ type Props = {
   className?: string;
   initialCenter?: LngLat;
   initialZoom?: number;
+  /** Frame the camera on the route instead of the default valley. */
+  fitToTrack?: boolean;
 };
 
 export function MapCanvas({
-  activity,
   styleId,
   pitched,
   geometry,
@@ -47,25 +51,40 @@ export function MapCanvas({
   showOriginal,
   waypoints,
   puck,
+  userLocation = null,
   interactive = true,
   onClickLngLat,
   onWaypointMove,
   onReady,
   className,
-  initialCenter = [6.8694, 45.9237],
+  initialCenter,
   initialZoom = 11.4,
+  fitToTrack = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const userMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const clickRef = useRef(onClickLngLat);
   const moveRef = useRef(onWaypointMove);
   const geometryRef = useRef(geometry);
   const originalRef = useRef(originalGeometry);
-  clickRef.current = onClickLngLat;
-  moveRef.current = onWaypointMove;
-  geometryRef.current = geometry;
-  originalRef.current = originalGeometry;
+  const pitchedRef = useRef(pitched);
+  const userLocationRef = useRef(userLocation);
+  const styleEpochRef = useRef(0);
+  const skipInitialStyleRef = useRef(true);
+  const lastStyleIdRef = useRef(styleId);
+  const fitToTrackRef = useRef(fitToTrack);
+
+  useEffect(() => {
+    clickRef.current = onClickLngLat;
+    moveRef.current = onWaypointMove;
+    geometryRef.current = geometry;
+    originalRef.current = originalGeometry;
+    pitchedRef.current = pitched;
+    userLocationRef.current = userLocation;
+    fitToTrackRef.current = fitToTrack;
+  });
 
   useEffect(() => {
     if (!containerRef.current || !TOKEN) return;
@@ -73,21 +92,30 @@ export function MapCanvas({
     const map = new mapboxgl.Map({
       container: containerRef.current,
       style: MAP_STYLES[styleId].url,
-      center: initialCenter,
+      center: initialCenter ?? centerFromGeometry(geometry) ?? CHAMONIX,
       zoom: initialZoom,
       pitch: pitched ? 62 : 0,
-      bearing: -18,
+      bearing: pitched ? -18 : 0,
       antialias: true,
       attributionControl: true,
       cooperativeGestures: false,
     });
     mapRef.current = map;
-    map.dragRotate.enable();
-    map.touchZoomRotate.enableRotation();
+    if (!pitched) {
+      map.dragRotate.disable();
+      map.touchZoomRotate.disableRotation();
+    } else {
+      map.dragRotate.enable();
+      map.touchZoomRotate.enableRotation();
+    }
 
     const onLoad = () => {
-      enableTerrain(map, styleId);
-      ensureLayers(map, activity);
+      const shouldFit = fitToTrackRef.current;
+      finishStyle(map, styleId, pitchedRef.current, { animate: !shouldFit });
+      setLineData(map, SOURCE_ROUTE, geometryRef.current);
+      setLineData(map, SOURCE_ORIGINAL, originalRef.current);
+      applyUserMarker(map, userMarkerRef, userLocationRef.current);
+      if (shouldFit) fitTrack(map, geometryRef.current, { pitched: pitchedRef.current, duration: 0 });
       onReady?.(map);
     };
     map.on("load", onLoad);
@@ -99,6 +127,8 @@ export function MapCanvas({
     return () => {
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
+      userMarkerRef.current?.remove();
+      userMarkerRef.current = null;
       map.remove();
       mapRef.current = null;
     };
@@ -113,32 +143,63 @@ export function MapCanvas({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    map.setPitch(pitched ? 62 : 0, { duration: 900 });
-  }, [pitched]);
+    if (!map?.isStyleLoaded()) return;
+    applyDimension(map, styleId, pitched);
+  }, [pitched, styleId]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    map.setStyle(MAP_STYLES[styleId].url);
-    map.once("style.load", () => {
-      enableTerrain(map, styleId);
-      ensureLayers(map, activity);
+    const prev = lastStyleIdRef.current;
+    lastStyleIdRef.current = styleId;
+    if (skipInitialStyleRef.current) {
+      skipInitialStyleRef.current = false;
+      return;
+    }
+
+    const restoreOverlays = () => {
+      finishStyle(map, styleId, pitchedRef.current, { animate: false });
       setLineData(map, SOURCE_ROUTE, geometryRef.current);
       setLineData(map, SOURCE_ORIGINAL, originalRef.current);
-      paintRoute(map, activity);
+      if (fitToTrackRef.current) {
+        fitTrack(map, geometryRef.current, { pitched: pitchedRef.current, duration: 0 });
+      }
+    };
+
+    if (
+      styleId === "winter" &&
+      MAP_STYLES[prev].url === MAP_STYLES.winter.url &&
+      map.isStyleLoaded()
+    ) {
+      restoreOverlays();
+      return;
+    }
+
+    const epoch = ++styleEpochRef.current;
+    map.setStyle(MAP_STYLES[styleId].url, { diff: false } as Parameters<mapboxgl.Map["setStyle"]>[1]);
+    map.once("style.load", () => {
+      if (epoch !== styleEpochRef.current) return;
+      restoreOverlays();
+      userMarkerRef.current?.remove();
+      userMarkerRef.current = null;
+      applyUserMarker(map, userMarkerRef, userLocationRef.current);
     });
-  }, [styleId, activity]);
+  }, [styleId]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map?.isStyleLoaded()) return;
-    ensureLayers(map, activity);
+    ensureLayers(map);
     setLineData(map, SOURCE_ROUTE, geometry);
     setLineData(map, SOURCE_ORIGINAL, originalGeometry);
     map.setLayoutProperty(LAYER_ORIGINAL, "visibility", showOriginal ? "visible" : "none");
-    paintRoute(map, activity);
-  }, [geometry, originalGeometry, showOriginal, activity, pitched]);
+  }, [geometry, originalGeometry, showOriginal, pitched]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded() || !fitToTrack) return;
+    fitTrack(map, geometry, { pitched, duration: 0 });
+  }, [geometry, fitToTrack, pitched]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -148,7 +209,7 @@ export function MapCanvas({
       const el = document.createElement("button");
       el.type = "button";
       el.className = "ridgeline-marker";
-      el.style.cssText = markerStyle(wp.kind, ACTIVITY_META[activity].color);
+      el.style.cssText = markerStyle(wp.kind, TRACK_COLOR);
       el.textContent = wp.kind === "start" ? "" : wp.kind === "end" ? "▲" : String(i);
       el.setAttribute("aria-label", wp.label ?? wp.kind);
       const marker = new mapboxgl.Marker({ element: el, draggable: Boolean(moveRef.current) })
@@ -160,12 +221,12 @@ export function MapCanvas({
       });
       return marker;
     });
-  }, [waypoints, activity]);
+  }, [waypoints]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map?.isStyleLoaded()) return;
-    ensureLayers(map, activity);
+    ensureLayers(map);
     const source = map.getSource(SOURCE_PUCK) as mapboxgl.GeoJSONSource | undefined;
     source?.setData({
       type: "FeatureCollection",
@@ -179,7 +240,13 @@ export function MapCanvas({
           ]
         : [],
     });
-  }, [puck, activity]);
+  }, [puck]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    applyUserMarker(map, userMarkerRef, userLocation);
+  }, [userLocation]);
 
   if (!TOKEN) {
     return (
@@ -192,6 +259,50 @@ export function MapCanvas({
   return <div ref={containerRef} className={className ?? "h-full w-full"} />;
 }
 
+function finishStyle(
+  map: mapboxgl.Map,
+  styleId: MapStyleId,
+  threeD: boolean,
+  opts?: { animate?: boolean },
+) {
+  if (styleId === "winter") applyWinterBasemap(map);
+  applyDimension(map, styleId, threeD, opts);
+  ensureLayers(map);
+}
+
+function applyDimension(
+  map: mapboxgl.Map,
+  styleId: MapStyleId,
+  threeD: boolean,
+  opts?: { animate?: boolean },
+) {
+  const duration = opts?.animate === false ? 0 : 900;
+  try {
+    if (threeD) {
+      enableTerrain(map, styleId);
+      map.dragRotate.enable();
+      map.touchZoomRotate.enableRotation();
+      map.easeTo({ pitch: 62, bearing: map.getBearing() || -18, duration });
+      return;
+    }
+
+    map.setTerrain(null);
+    map.setFog(null);
+    if (map.getLayer(LAYER_SKY)) {
+      map.removeLayer(LAYER_SKY);
+    }
+    map.dragRotate.disable();
+    map.touchZoomRotate.disableRotation();
+    map.easeTo({ pitch: 0, bearing: 0, duration });
+  } catch {
+    map.easeTo({
+      pitch: threeD ? 62 : 0,
+      bearing: threeD ? map.getBearing() : 0,
+      duration,
+    });
+  }
+}
+
 function enableTerrain(map: mapboxgl.Map, styleId: MapStyleId) {
   if (!map.getSource(SOURCE_DEM)) {
     map.addSource(SOURCE_DEM, {
@@ -202,24 +313,41 @@ function enableTerrain(map: mapboxgl.Map, styleId: MapStyleId) {
     });
   }
   map.setTerrain({ source: SOURCE_DEM, exaggeration: styleId === "satellite" ? 1.15 : 1.35 });
+  const winter = styleId === "winter";
   map.setFog({
-    color: styleId === "winter" ? "rgb(40, 52, 68)" : "rgb(186, 210, 235)",
-    "high-color": styleId === "winter" ? "rgb(18, 28, 42)" : "rgb(36, 92, 223)",
-    "horizon-blend": 0.06,
-    "space-color": "#07080A",
-    "star-intensity": styleId === "winter" ? 0.4 : 0.15,
+    color: winter ? "rgb(226, 234, 242)" : "rgb(186, 210, 235)",
+    "high-color": winter ? "rgb(170, 198, 226)" : "rgb(36, 92, 223)",
+    "horizon-blend": winter ? 0.08 : 0.06,
+    "space-color": winter ? "#9BB8D3" : "#07080A",
+    "star-intensity": winter ? 0 : 0.15,
   });
-  if (!map.getLayer(LAYER_SKY)) {
-    map.addLayer({
+  if (map.getLayer(LAYER_SKY)) {
+    map.removeLayer(LAYER_SKY);
+  }
+  const before =
+    (map.getLayer(LAYER_ORIGINAL) && LAYER_ORIGINAL) ||
+    (map.getLayer(LAYER_ROUTE_GLOW) && LAYER_ROUTE_GLOW) ||
+    undefined;
+  map.addLayer(
+    {
       id: LAYER_SKY,
       type: "sky",
-      paint: {
-        "sky-type": "atmosphere",
-        "sky-atmosphere-sun": [0.0, 0.0],
-        "sky-atmosphere-sun-intensity": 5,
-      },
-    });
-  }
+      paint: winter
+        ? {
+            "sky-type": "atmosphere",
+            "sky-atmosphere-sun": [0, 75],
+            "sky-atmosphere-sun-intensity": 16,
+            "sky-atmosphere-color": "rgb(186, 210, 235)",
+            "sky-atmosphere-halo-color": "rgb(255, 255, 255)",
+          }
+        : {
+            "sky-type": "atmosphere",
+            "sky-atmosphere-sun": [0.0, 0.0],
+            "sky-atmosphere-sun-intensity": 5,
+          },
+    },
+    before,
+  );
 }
 
 function emptyLine(): GeoJSON.Feature {
@@ -230,7 +358,7 @@ function emptyPoints(): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features: [] };
 }
 
-function ensureLayers(map: mapboxgl.Map, activity: Activity) {
+function ensureLayers(map: mapboxgl.Map) {
   if (!map.getSource(SOURCE_ROUTE)) {
     map.addSource(SOURCE_ROUTE, { type: "geojson", data: emptyLine() });
   }
@@ -261,7 +389,7 @@ function ensureLayers(map: mapboxgl.Map, activity: Activity) {
       source: SOURCE_ROUTE,
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": ACTIVITY_META[activity].color,
+        "line-color": TRACK_COLOR,
         "line-width": 12,
         "line-opacity": 0.28,
         "line-blur": 2,
@@ -275,7 +403,7 @@ function ensureLayers(map: mapboxgl.Map, activity: Activity) {
       source: SOURCE_ROUTE,
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
-        "line-color": ACTIVITY_META[activity].color,
+        "line-color": TRACK_COLOR,
         "line-width": 4,
         "line-opacity": 0.95,
       },
@@ -290,7 +418,7 @@ function ensureLayers(map: mapboxgl.Map, activity: Activity) {
         "circle-radius": 7,
         "circle-color": "#F4F1EA",
         "circle-stroke-width": 3,
-        "circle-stroke-color": ACTIVITY_META[activity].color,
+        "circle-stroke-color": TRACK_COLOR,
       },
     });
   }
@@ -303,19 +431,6 @@ function setLineData(map: mapboxgl.Map, sourceId: string, geometry: LineString |
     properties: {},
     geometry: geometry ?? { type: "LineString", coordinates: [] },
   });
-}
-
-function paintRoute(map: mapboxgl.Map, activity: Activity) {
-  const color = ACTIVITY_META[activity].color;
-  if (map.getLayer(LAYER_ROUTE_GLOW)) {
-    map.setPaintProperty(LAYER_ROUTE_GLOW, "line-color", color);
-  }
-  if (map.getLayer(LAYER_ROUTE_CORE)) {
-    map.setPaintProperty(LAYER_ROUTE_CORE, "line-color", color);
-  }
-  if (map.getLayer(LAYER_PUCK)) {
-    map.setPaintProperty(LAYER_PUCK, "circle-stroke-color", color);
-  }
 }
 
 function markerStyle(kind: Waypoint["kind"], color: string) {
@@ -336,11 +451,67 @@ function markerStyle(kind: Waypoint["kind"], color: string) {
   ].join(";");
 }
 
-export async function flyTheLine(map: mapboxgl.Map, geometry: LineString) {
-  if (geometry.coordinates.length < 2) return;
-  const start = geometry.coordinates[0] as [number, number];
-  const mid = geometry.coordinates[Math.floor(geometry.coordinates.length / 2)] as [number, number];
-  map.flyTo({ center: start, zoom: 12.5, pitch: 68, bearing: 20, duration: 1400 });
-  await new Promise((r) => setTimeout(r, 1500));
-  map.flyTo({ center: mid, zoom: 13.2, pitch: 64, duration: 1800 });
+function makeUserPinEl() {
+  const el = document.createElement("div");
+  el.className = "ridgeline-user-pin";
+  el.setAttribute("role", "img");
+  el.setAttribute("aria-label", "Your location");
+  const pulse = document.createElement("span");
+  pulse.className = "ridgeline-user-pin-pulse";
+  const dot = document.createElement("span");
+  dot.className = "ridgeline-user-pin-dot";
+  el.append(pulse, dot);
+  return el;
+}
+
+function applyUserMarker(
+  map: mapboxgl.Map,
+  markerRef: { current: mapboxgl.Marker | null },
+  location: LngLat | null,
+) {
+  if (!location) {
+    markerRef.current?.remove();
+    markerRef.current = null;
+    return;
+  }
+  if (markerRef.current) {
+    markerRef.current.setLngLat(location);
+    return;
+  }
+  markerRef.current = new mapboxgl.Marker({
+    element: makeUserPinEl(),
+    anchor: "center",
+  })
+    .setLngLat(location)
+    .addTo(map);
+}
+
+function centerFromGeometry(geometry: LineString | null): LngLat | undefined {
+  if (!geometry?.coordinates.length) return undefined;
+  const box = bboxOf(geometry.coordinates);
+  if (!box) return geometry.coordinates[0];
+  return [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
+}
+
+export function fitTrack(
+  map: mapboxgl.Map,
+  geometry: LineString | null,
+  opts?: { pitched?: boolean; duration?: number },
+) {
+  if (!geometry || geometry.coordinates.length < 2) return;
+  const bounds = new mapboxgl.LngLatBounds();
+  for (const coord of geometry.coordinates) {
+    bounds.extend(coord as [number, number]);
+  }
+  const pitched = opts?.pitched ?? true;
+  const reduce =
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  map.fitBounds(bounds, {
+    padding: { top: 96, bottom: 240, left: 40, right: 40 },
+    duration: reduce ? 0 : (opts?.duration ?? 0),
+    maxZoom: 14.2,
+    pitch: pitched ? 62 : 0,
+    bearing: pitched ? -18 : 0,
+    essential: true,
+  });
 }

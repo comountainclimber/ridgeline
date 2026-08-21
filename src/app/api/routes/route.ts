@@ -4,9 +4,8 @@ import { nanoid } from "nanoid";
 import { requireUser } from "@/lib/auth/session";
 import { requireDb } from "@/lib/db";
 import { routes } from "@/lib/db/schema";
-import { routeBbox, routePayload } from "@/lib/geo/helpers";
-import { ACTIVITIES } from "@/lib/geo/types";
-import type { Activity, LineString, Waypoint } from "@/lib/geo/types";
+import { DEFAULT_ROUTE_ACTIVITY, routeBbox, routePayload } from "@/lib/geo/helpers";
+import type { LineString, Waypoint } from "@/lib/geo/types";
 
 export async function GET() {
   const user = await requireUser();
@@ -25,11 +24,8 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const user = await requireUser();
   const body = await req.json().catch(() => null);
-  if (!body?.name || !body?.geometry || !body?.activity) {
-    return NextResponse.json({ error: "Route needs a name, activity, and geometry." }, { status: 400 });
-  }
-  if (!(ACTIVITIES as readonly string[]).includes(body.activity)) {
-    return NextResponse.json({ error: "Unknown activity." }, { status: 400 });
+  if (!body?.name || !body?.geometry) {
+    return NextResponse.json({ error: "Route needs a name and geometry." }, { status: 400 });
   }
   const geometry = body.geometry as LineString;
   const waypoints = (body.waypoints ?? []) as Waypoint[];
@@ -43,7 +39,7 @@ export async function POST(req: NextRequest) {
       ownerId: user.id,
       name: String(body.name).slice(0, 120),
       description: body.description ? String(body.description).slice(0, 2000) : null,
-      activity: body.activity as Activity,
+      activity: DEFAULT_ROUTE_ACTIVITY,
       visibility: body.visibility === "public" ? "public" : "private",
       geometry,
       waypoints,
