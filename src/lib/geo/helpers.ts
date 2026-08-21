@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
-import type { LineString, RouteStats, SavedRoute, Waypoint } from "@/lib/geo/types";
-import { bboxOf } from "@/lib/geo/stats";
+import type { LineString, RouteStats, SavedRoute, Waypoint } from "./types";
+import { bboxOf } from "./stats";
 
 /** Leftover NOT NULL column; tracks are not sport-typed. */
 export const DEFAULT_ROUTE_ACTIVITY = "hike";
@@ -22,8 +22,15 @@ export function makeWaypoint(
   lng: number,
   lat: number,
   kind: Waypoint["kind"],
+  opts?: { bushwhack?: boolean },
 ): Waypoint {
-  return { id: nanoid(8), lng, lat, kind };
+  return {
+    id: nanoid(8),
+    lng,
+    lat,
+    kind,
+    ...(opts?.bushwhack ? { bushwhack: true } : {}),
+  };
 }
 
 export function relabelWaypoints(points: Waypoint[]): Waypoint[] {

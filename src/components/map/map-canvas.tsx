@@ -6,13 +6,18 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import type { LineString, LngLat, MapStyleId, Waypoint } from "@/lib/geo/types";
 import { bboxOf } from "@/lib/geo/stats";
 import {
-  CHAMONIX,
+  CRESTED_BUTTE,
+  CRESTED_BUTTE_BEARING,
+  CRESTED_BUTTE_PITCH,
+  CRESTED_BUTTE_ZOOM,
+  LAYER_BUSHWHACK,
   LAYER_ORIGINAL,
   LAYER_PUCK,
   LAYER_ROUTE_CORE,
   LAYER_ROUTE_GLOW,
   LAYER_SKY,
   MAP_STYLES,
+  SOURCE_BUSHWHACK,
   SOURCE_DEM,
   SOURCE_ORIGINAL,
   SOURCE_PUCK,
@@ -29,6 +34,9 @@ type Props = {
   geometry: LineString | null;
   originalGeometry: LineString | null;
   showOriginal: boolean;
+  /** Snapped trail runs only. When omitted, `geometry` is drawn solid. */
+  trailParts?: LngLat[][] | null;
+  bushwhackParts?: LngLat[][] | null;
   waypoints: Waypoint[];
   puck: LngLat | null;
   userLocation?: LngLat | null;
@@ -39,7 +47,9 @@ type Props = {
   className?: string;
   initialCenter?: LngLat;
   initialZoom?: number;
-  /** Frame the camera on the route instead of the default valley. */
+  initialBearing?: number;
+  initialPitch?: number;
+  /** Frame the camera on the route instead of the default mountain. */
   fitToTrack?: boolean;
 };
 
@@ -49,6 +59,8 @@ export function MapCanvas({
   geometry,
   originalGeometry,
   showOriginal,
+  trailParts = null,
+  bushwhackParts = null,
   waypoints,
   puck,
   userLocation = null,
@@ -58,7 +70,9 @@ export function MapCanvas({
   onReady,
   className,
   initialCenter,
-  initialZoom = 11.4,
+  initialZoom = CRESTED_BUTTE_ZOOM,
+  initialBearing = CRESTED_BUTTE_BEARING,
+  initialPitch = CRESTED_BUTTE_PITCH,
   fitToTrack = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -69,6 +83,8 @@ export function MapCanvas({
   const moveRef = useRef(onWaypointMove);
   const geometryRef = useRef(geometry);
   const originalRef = useRef(originalGeometry);
+  const trailPartsRef = useRef(trailParts);
+  const bushwhackPartsRef = useRef(bushwhackParts);
   const pitchedRef = useRef(pitched);
   const userLocationRef = useRef(userLocation);
   const styleEpochRef = useRef(0);
@@ -81,6 +97,8 @@ export function MapCanvas({
     moveRef.current = onWaypointMove;
     geometryRef.current = geometry;
     originalRef.current = originalGeometry;
+    trailPartsRef.current = trailParts;
+    bushwhackPartsRef.current = bushwhackParts;
     pitchedRef.current = pitched;
     userLocationRef.current = userLocation;
     fitToTrackRef.current = fitToTrack;
@@ -92,10 +110,11 @@ export function MapCanvas({
     const map = new mapboxgl.Map({
       container: containerRef.current,
       style: MAP_STYLES[styleId].url,
-      center: initialCenter ?? centerFromGeometry(geometry) ?? CHAMONIX,
+      center: initialCenter ?? centerFromGeometry(geometry) ?? CRESTED_BUTTE,
       zoom: initialZoom,
-      pitch: pitched ? 62 : 0,
-      bearing: pitched ? -18 : 0,
+      pitch: pitched ? initialPitch : 0,
+      bearing: pitched ? initialBearing : 0,
+      maxPitch: 85,
       antialias: true,
       attributionControl: true,
       cooperativeGestures: false,
@@ -112,8 +131,9 @@ export function MapCanvas({
     const onLoad = () => {
       const shouldFit = fitToTrackRef.current;
       finishStyle(map, styleId, pitchedRef.current, { animate: !shouldFit });
-      setLineData(map, SOURCE_ROUTE, geometryRef.current);
+      setRouteData(map, geometryRef.current, trailPartsRef.current);
       setLineData(map, SOURCE_ORIGINAL, originalRef.current);
+      setMultiLineData(map, SOURCE_BUSHWHACK, bushwhackPartsRef.current);
       applyUserMarker(map, userMarkerRef, userLocationRef.current);
       if (shouldFit) fitTrack(map, geometryRef.current, { pitched: pitchedRef.current, duration: 0 });
       onReady?.(map);
@@ -159,8 +179,9 @@ export function MapCanvas({
 
     const restoreOverlays = () => {
       finishStyle(map, styleId, pitchedRef.current, { animate: false });
-      setLineData(map, SOURCE_ROUTE, geometryRef.current);
+      setRouteData(map, geometryRef.current, trailPartsRef.current);
       setLineData(map, SOURCE_ORIGINAL, originalRef.current);
+      setMultiLineData(map, SOURCE_BUSHWHACK, bushwhackPartsRef.current);
       if (fitToTrackRef.current) {
         fitTrack(map, geometryRef.current, { pitched: pitchedRef.current, duration: 0 });
       }
@@ -190,10 +211,11 @@ export function MapCanvas({
     const map = mapRef.current;
     if (!map?.isStyleLoaded()) return;
     ensureLayers(map);
-    setLineData(map, SOURCE_ROUTE, geometry);
+    setRouteData(map, geometry, trailParts);
     setLineData(map, SOURCE_ORIGINAL, originalGeometry);
+    setMultiLineData(map, SOURCE_BUSHWHACK, bushwhackParts);
     map.setLayoutProperty(LAYER_ORIGINAL, "visibility", showOriginal ? "visible" : "none");
-  }, [geometry, originalGeometry, showOriginal, pitched]);
+  }, [geometry, originalGeometry, showOriginal, trailParts, bushwhackParts, pitched]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -209,9 +231,13 @@ export function MapCanvas({
       const el = document.createElement("button");
       el.type = "button";
       el.className = "ridgeline-marker";
-      el.style.cssText = markerStyle(wp.kind, TRACK_COLOR);
+      const offTrail = Boolean(wp.bushwhack) && wp.kind !== "start";
+      el.style.cssText = markerStyle(wp.kind, TRACK_COLOR, offTrail);
       el.textContent = wp.kind === "start" ? "" : wp.kind === "end" ? "▲" : String(i);
-      el.setAttribute("aria-label", wp.label ?? wp.kind);
+      el.setAttribute(
+        "aria-label",
+        offTrail ? `${wp.label ?? wp.kind}, off trail` : (wp.label ?? wp.kind),
+      );
       const marker = new mapboxgl.Marker({ element: el, draggable: Boolean(moveRef.current) })
         .setLngLat([wp.lng, wp.lat])
         .addTo(map);
@@ -282,7 +308,11 @@ function applyDimension(
       enableTerrain(map, styleId);
       map.dragRotate.enable();
       map.touchZoomRotate.enableRotation();
-      map.easeTo({ pitch: 62, bearing: map.getBearing() || -18, duration });
+      map.easeTo({
+        pitch: map.getPitch() || CRESTED_BUTTE_PITCH,
+        bearing: map.getBearing() || CRESTED_BUTTE_BEARING,
+        duration,
+      });
       return;
     }
 
@@ -296,7 +326,7 @@ function applyDimension(
     map.easeTo({ pitch: 0, bearing: 0, duration });
   } catch {
     map.easeTo({
-      pitch: threeD ? 62 : 0,
+      pitch: threeD ? map.getPitch() || CRESTED_BUTTE_PITCH : 0,
       bearing: threeD ? map.getBearing() : 0,
       duration,
     });
@@ -354,6 +384,10 @@ function emptyLine(): GeoJSON.Feature {
   return { type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [] } };
 }
 
+function emptyMultiLine(): GeoJSON.Feature {
+  return { type: "Feature", properties: {}, geometry: { type: "MultiLineString", coordinates: [] } };
+}
+
 function emptyPoints(): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features: [] };
 }
@@ -364,6 +398,9 @@ function ensureLayers(map: mapboxgl.Map) {
   }
   if (!map.getSource(SOURCE_ORIGINAL)) {
     map.addSource(SOURCE_ORIGINAL, { type: "geojson", data: emptyLine() });
+  }
+  if (!map.getSource(SOURCE_BUSHWHACK)) {
+    map.addSource(SOURCE_BUSHWHACK, { type: "geojson", data: emptyMultiLine() });
   }
   if (!map.getSource(SOURCE_PUCK)) {
     map.addSource(SOURCE_PUCK, { type: "geojson", data: emptyPoints() });
@@ -409,6 +446,20 @@ function ensureLayers(map: mapboxgl.Map) {
       },
     });
   }
+  if (!map.getLayer(LAYER_BUSHWHACK)) {
+    map.addLayer({
+      id: LAYER_BUSHWHACK,
+      type: "line",
+      source: SOURCE_BUSHWHACK,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": TRACK_COLOR,
+        "line-width": 4,
+        "line-opacity": 0.95,
+        "line-dasharray": [1.6, 1.4],
+      },
+    });
+  }
   if (!map.getLayer(LAYER_PUCK)) {
     map.addLayer({
       id: LAYER_PUCK,
@@ -433,14 +484,38 @@ function setLineData(map: mapboxgl.Map, sourceId: string, geometry: LineString |
   });
 }
 
-function markerStyle(kind: Waypoint["kind"], color: string) {
+function setMultiLineData(map: mapboxgl.Map, sourceId: string, parts: LngLat[][] | null) {
+  const source = map.getSource(sourceId) as mapboxgl.GeoJSONSource | undefined;
+  source?.setData({
+    type: "Feature",
+    properties: {},
+    geometry: {
+      type: "MultiLineString",
+      coordinates: (parts ?? []).filter((part) => part.length >= 2),
+    },
+  });
+}
+
+function setRouteData(
+  map: mapboxgl.Map,
+  geometry: LineString | null,
+  trailParts: LngLat[][] | null,
+) {
+  if (trailParts != null) {
+    setMultiLineData(map, SOURCE_ROUTE, trailParts);
+    return;
+  }
+  setLineData(map, SOURCE_ROUTE, geometry);
+}
+
+function markerStyle(kind: Waypoint["kind"], color: string, offTrail = false) {
   const size = kind === "via" ? 22 : 26;
   return [
     `width:${size}px`,
     `height:${size}px`,
     "border-radius:999px",
     `background:${kind === "end" ? color : "#07080A"}`,
-    `border:2px solid ${color}`,
+    `border:2px ${offTrail ? "dashed" : "solid"} ${color}`,
     "color:#F4F1EA",
     "font-size:10px",
     "font-weight:600",

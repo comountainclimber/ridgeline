@@ -14,7 +14,11 @@ export type Waypoint = {
   lat: number;
   label?: string;
   kind: WaypointKind;
+  /** When true, the leg into this pin is a straight off-trail line. */
+  bushwhack?: boolean;
 };
+
+export type DrawMode = "trail" | "bushwhack";
 
 export type LineString = {
   type: "LineString";

@@ -6,6 +6,12 @@ import { useEffect, useState } from "react";
 import { SessionNav } from "@/components/auth/session-nav";
 import { Wordmark } from "@/components/brand/wordmark";
 import type { LineString } from "@/lib/geo/types";
+import {
+  CRESTED_BUTTE,
+  CRESTED_BUTTE_BEARING,
+  CRESTED_BUTTE_PITCH,
+  CRESTED_BUTTE_ZOOM,
+} from "@/lib/map/layers";
 
 const MapCanvas = dynamic(
   () => import("@/components/map/map-canvas").then((m) => m.MapCanvas),
@@ -21,8 +27,8 @@ export function LandingHero() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         waypoints: [
-          { lng: 6.8694, lat: 45.9237 },
-          { lng: 6.8875, lat: 45.9672 },
+          { lng: -106.9876, lat: 38.8697 },
+          { lng: -106.9648, lat: 38.8995 },
         ],
       }),
     })
@@ -44,8 +50,10 @@ export function LandingHero() {
         waypoints={[]}
         puck={null}
         interactive={false}
-        initialCenter={[6.8694, 45.9237]}
-        initialZoom={12.2}
+        initialCenter={CRESTED_BUTTE}
+        initialZoom={CRESTED_BUTTE_ZOOM}
+        initialBearing={CRESTED_BUTTE_BEARING}
+        initialPitch={CRESTED_BUTTE_PITCH}
       />
       <div
         aria-hidden

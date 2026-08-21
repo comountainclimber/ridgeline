@@ -1,5 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
-import { MAP_STYLES, applyWinterBasemap } from "./layers";
+import {
+  CRESTED_BUTTE,
+  CRESTED_BUTTE_BEARING,
+  CRESTED_BUTTE_PITCH,
+  CRESTED_BUTTE_ZOOM,
+  MAP_STYLES,
+  applyWinterBasemap,
+} from "./layers";
+
+describe("CRESTED_BUTTE", () => {
+  it("looks up at Mt. Crested Butte from the valley floor", () => {
+    expect(CRESTED_BUTTE[0]).toBeCloseTo(-106.97, 1);
+    expect(CRESTED_BUTTE[1]).toBeCloseTo(38.88, 1);
+    expect(CRESTED_BUTTE_ZOOM).toBeGreaterThan(14);
+    expect(CRESTED_BUTTE_PITCH).toBeGreaterThan(70);
+    expect(CRESTED_BUTTE_BEARING).toBeGreaterThan(40);
+  });
+});
 
 describe("MAP_STYLES", () => {
   it("keeps winter on outdoors cartography instead of the dark grey basemap", () => {
