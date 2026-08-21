@@ -1,5 +1,12 @@
+type AppUrlEnv = {
+  NEXT_PUBLIC_APP_URL?: string;
+  VERCEL_ENV?: string;
+  VERCEL_PROJECT_PRODUCTION_URL?: string;
+  VERCEL_URL?: string;
+};
+
 /** Canonical public origin. Magic-link emails and metadata must use this, never localhost in prod. */
-export function resolveAppUrl(env: NodeJS.ProcessEnv = process.env): string {
+export function resolveAppUrl(env: AppUrlEnv | NodeJS.ProcessEnv = process.env): string {
   const explicit = normalizeOrigin(env.NEXT_PUBLIC_APP_URL);
   if (explicit && !isLoopback(explicit)) return explicit;
 
