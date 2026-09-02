@@ -35,6 +35,7 @@ import { formatDistance, formatElevation, formatVert } from "@/lib/geo/format";
 import {
   ELEVATION_SAMPLE_M,
   densify,
+  lineDistance,
   pointAlong,
   prepareElevationSamples,
   statsFromSamples,
@@ -45,6 +46,14 @@ import {
   reverseWaypointsPreservingLegs,
   splitRouteRuns,
 } from "@/lib/geo/compose";
+import {
+  canRotateLoopJoin,
+  isClosedLoop,
+  nearestPointOnLine,
+  rotateClosedLineTo,
+  rotateElevationSamples,
+  rotateLoopWaypoints,
+} from "@/lib/geo/loop";
 import {
   type DrawMode,
   type ElevationSample,
@@ -64,6 +73,7 @@ type History = {
   originalGeometry: LineString | null;
   snapParts: LngLat[][];
   bushwhackParts: LngLat[][];
+  samples: ElevationSample[];
 };
 
 async function snapAlongTrails(coords: LngLat[]): Promise<LineString> {
@@ -124,12 +134,17 @@ export function PlannerApp({
   const pendingFit = useRef<LineString | null>(null);
   const watchId = useRef<number | null>(null);
   const didAutoLocate = useRef(false);
+  const elevationSeq = useRef(0);
   const importGeometryRef = useRef<(trackName: string, original: LineString) => Promise<void>>(
     async () => undefined,
   );
 
   const stats = useMemo(() => statsFromSamples(samples), [samples]);
   const puck = hoverM != null && geometry ? pointAlong(geometry.coordinates, hoverM) : null;
+  const loopJoin = useMemo(
+    () => canRotateLoopJoin(geometry, bushwhackParts),
+    [bushwhackParts, geometry],
+  );
 
   const pushHistory = useCallback((next: History) => {
     history.current.push({
@@ -138,6 +153,7 @@ export function PlannerApp({
       originalGeometry,
       snapParts,
       bushwhackParts,
+      samples,
     });
     future.current = [];
     if (history.current.length > 40) history.current.shift();
@@ -146,11 +162,13 @@ export function PlannerApp({
     setOriginalGeometry(next.originalGeometry);
     setSnapParts(next.snapParts);
     setBushwhackParts(next.bushwhackParts);
-  }, [bushwhackParts, geometry, originalGeometry, snapParts, waypoints]);
+    setSamples(next.samples);
+  }, [bushwhackParts, geometry, originalGeometry, samples, snapParts, waypoints]);
 
   const routeWaypoints = useCallback(
     async (pts: Waypoint[], original?: LineString | null) => {
       if (pts.length < 2) {
+        elevationSeq.current += 1;
         setGeometry(null);
         setSamples([]);
         setSnapParts([]);
@@ -177,6 +195,7 @@ export function PlannerApp({
   );
 
   async function sampleElevations(geo: LineString) {
+    const seq = ++elevationSeq.current;
     const dense = densify(geo.coordinates, ELEVATION_SAMPLE_M);
     const res = await fetch("/api/map/elevation", {
       method: "POST",
@@ -184,6 +203,7 @@ export function PlannerApp({
       body: JSON.stringify({ coordinates: dense }),
     });
     const json = await res.json().catch(() => ({}));
+    if (seq !== elevationSeq.current) return;
     const elevations = (json.elevations ?? []) as (number | null)[];
     setSamples(prepareElevationSamples(dense, elevations));
   }
@@ -358,36 +378,40 @@ export function PlannerApp({
       ...waypoints.map((w) => ({ ...w, kind: w.kind === "end" ? "via" : w.kind })),
       makeWaypoint(lng, lat, kind, { bushwhack: drawMode === "bushwhack" }),
     ]);
-    pushHistory({ waypoints: next, geometry, originalGeometry, snapParts, bushwhackParts });
+    pushHistory({ waypoints: next, geometry, originalGeometry, snapParts, bushwhackParts, samples });
     void routeWaypoints(next);
   };
 
   const movePoint = (id: string, lng: number, lat: number) => {
     const next = waypoints.map((w) => (w.id === id ? { ...w, lng, lat } : w));
-    pushHistory({ waypoints: next, geometry, originalGeometry, snapParts, bushwhackParts });
+    pushHistory({ waypoints: next, geometry, originalGeometry, snapParts, bushwhackParts, samples });
     void routeWaypoints(next);
   };
 
   const undo = () => {
     const prev = history.current.pop();
     if (!prev) return;
-    future.current.push({ waypoints, geometry, originalGeometry, snapParts, bushwhackParts });
+    future.current.push({ waypoints, geometry, originalGeometry, snapParts, bushwhackParts, samples });
+    elevationSeq.current += 1;
     setWaypoints(prev.waypoints);
     setGeometry(prev.geometry);
     setOriginalGeometry(prev.originalGeometry);
     setSnapParts(prev.snapParts ?? []);
     setBushwhackParts(prev.bushwhackParts ?? []);
+    setSamples(prev.samples ?? []);
   };
 
   const redo = () => {
     const next = future.current.pop();
     if (!next) return;
-    history.current.push({ waypoints, geometry, originalGeometry, snapParts, bushwhackParts });
+    history.current.push({ waypoints, geometry, originalGeometry, snapParts, bushwhackParts, samples });
+    elevationSeq.current += 1;
     setWaypoints(next.waypoints);
     setGeometry(next.geometry);
     setOriginalGeometry(next.originalGeometry);
     setSnapParts(next.snapParts ?? []);
     setBushwhackParts(next.bushwhackParts ?? []);
+    setSamples(next.samples ?? []);
   };
 
   const reverse = () => {
@@ -398,6 +422,7 @@ export function PlannerApp({
       originalGeometry,
       snapParts: snapParts.map((part) => [...part].reverse()).reverse(),
       bushwhackParts: bushwhackParts.map((part) => [...part].reverse()).reverse(),
+      samples,
     });
     void routeWaypoints(next);
   };
@@ -409,8 +434,39 @@ export function PlannerApp({
       ...waypoints,
       makeWaypoint(start.lng, start.lat, "end", { bushwhack: drawMode === "bushwhack" }),
     ]);
-    pushHistory({ waypoints: next, geometry, originalGeometry, snapParts, bushwhackParts });
+    pushHistory({ waypoints: next, geometry, originalGeometry, snapParts, bushwhackParts, samples });
     void routeWaypoints(next);
+  };
+
+  const moveLoopJoin = (lng: number, lat: number) => {
+    if (!canRotateLoopJoin(geometry, bushwhackParts) || !geometry) return;
+    const point: LngLat = [lng, lat];
+    const rotated = rotateClosedLineTo(geometry.coordinates, point);
+    if (!rotated) return;
+    const hit = nearestPointOnLine(geometry.coordinates, point);
+    if (!hit) return;
+    const total = lineDistance(geometry.coordinates);
+    if (hit.distanceAlongM < 2 || hit.distanceAlongM > total - 2) return;
+    const nextOriginal = originalGeometry
+      ? {
+          type: "LineString" as const,
+          coordinates:
+            rotateClosedLineTo(originalGeometry.coordinates, point) ?? originalGeometry.coordinates,
+        }
+      : originalGeometry;
+    const nextSnap =
+      snapParts.length === 1
+        ? [rotateClosedLineTo(snapParts[0], point) ?? snapParts[0]]
+        : [rotated];
+    elevationSeq.current += 1;
+    pushHistory({
+      waypoints: rotateLoopWaypoints(waypoints, point, geometry),
+      geometry: { type: "LineString", coordinates: rotated },
+      originalGeometry: nextOriginal,
+      snapParts: nextSnap,
+      bushwhackParts,
+      samples: rotateElevationSamples(samples, hit.distanceAlongM),
+    });
   };
 
   useEffect(() => {
@@ -426,6 +482,7 @@ export function PlannerApp({
           originalGeometry,
           snapParts: empty ? [] : snapParts,
           bushwhackParts: empty ? [] : bushwhackParts,
+          samples: empty ? [] : samples,
         });
         void routeWaypoints(next);
       }
@@ -520,6 +577,13 @@ export function PlannerApp({
           makeWaypoint(end[0], end[1], "end"),
         ]),
       );
+      const matched = res.ok ? (json.geometry as LineString | undefined) : original;
+      if (
+        isClosedLoop(original.coordinates) ||
+        (matched && isClosedLoop(matched.coordinates))
+      ) {
+        toast("Loop — drag Start along the track to change where it begins.");
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not read that GPX.");
     } finally {
@@ -579,6 +643,7 @@ export function PlannerApp({
         userLocation={userLocation}
         onClickLngLat={addPoint}
         onWaypointMove={movePoint}
+        onLoopJoinMove={loopJoin ? moveLoopJoin : undefined}
         onReady={(map) => {
           mapHolder.current = map;
           if (pendingFit.current) {
@@ -658,6 +723,7 @@ export function PlannerApp({
         <div className="pointer-events-auto glass rounded-2xl p-4">
           <WaypointPanel
             waypoints={waypoints}
+            loopJoin={loopJoin}
             onUndo={undo}
             onRedo={redo}
             onReverse={reverse}
@@ -669,8 +735,8 @@ export function PlannerApp({
                 originalGeometry: null,
                 snapParts: [],
                 bushwhackParts: [],
+                samples: [],
               });
-              setSamples([]);
             }}
           />
         </div>
@@ -710,6 +776,7 @@ export function PlannerApp({
             setSaveOpen(true);
           }}
           waypoints={waypoints}
+          loopJoin={loopJoin}
           onUndo={undo}
           onRedo={redo}
           onReverse={reverse}
@@ -721,8 +788,8 @@ export function PlannerApp({
               originalGeometry: null,
               snapParts: [],
               bushwhackParts: [],
+              samples: [],
             });
-            setSamples([]);
           }}
         />
       </div>

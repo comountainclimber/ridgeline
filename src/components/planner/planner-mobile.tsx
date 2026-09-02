@@ -200,6 +200,7 @@ export function PlannerMobileHud({
   onExport,
   onSave,
   waypoints,
+  loopJoin,
   onUndo,
   onRedo,
   onReverse,
@@ -224,6 +225,7 @@ export function PlannerMobileHud({
   onExport: () => void;
   onSave: () => void;
   waypoints: Waypoint[];
+  loopJoin?: boolean;
   onUndo: () => void;
   onRedo: () => void;
   onReverse: () => void;
@@ -303,6 +305,7 @@ export function PlannerMobileHud({
             <WaypointPanel
               showHeading={false}
               waypoints={waypoints}
+              loopJoin={loopJoin}
               onUndo={onUndo}
               onRedo={onRedo}
               onReverse={onReverse}
@@ -354,6 +357,7 @@ export function PlannerMobileHud({
 
 export function WaypointPanel({
   waypoints,
+  loopJoin = false,
   onUndo,
   onRedo,
   onReverse,
@@ -362,6 +366,7 @@ export function WaypointPanel({
   showHeading = true,
 }: {
   waypoints: Waypoint[];
+  loopJoin?: boolean;
   onUndo: () => void;
   onRedo: () => void;
   onReverse: () => void;
@@ -404,6 +409,11 @@ export function WaypointPanel({
           </li>
         ))}
       </ol>
+      {loopJoin ? (
+        <p className="mt-3 text-[11px] leading-snug text-[#9AA8B5]">
+          Drag Start along the loop to change where it begins.
+        </p>
+      ) : null}
       <div className="mt-4 flex flex-wrap gap-2">
         <Button size="sm" variant="secondary" onClick={onReverse}>
           Reverse

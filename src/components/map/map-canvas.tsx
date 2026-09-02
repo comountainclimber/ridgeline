@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { LineString, LngLat, MapStyleId, Waypoint } from "@/lib/geo/types";
+import { isClosedLoop, nearestPointOnLine } from "@/lib/geo/loop";
 import { bboxOf } from "@/lib/geo/stats";
 import {
   CRESTED_BUTTE,
@@ -43,6 +44,8 @@ type Props = {
   interactive?: boolean;
   onClickLngLat?: (lng: number, lat: number) => void;
   onWaypointMove?: (id: string, lng: number, lat: number) => void;
+  /** When set, dragging Start/End on a closed loop slides the join along the line. */
+  onLoopJoinMove?: (lng: number, lat: number) => void;
   onReady?: (map: mapboxgl.Map) => void;
   className?: string;
   initialCenter?: LngLat;
@@ -67,6 +70,7 @@ export function MapCanvas({
   interactive = true,
   onClickLngLat,
   onWaypointMove,
+  onLoopJoinMove,
   onReady,
   className,
   initialCenter,
@@ -81,6 +85,7 @@ export function MapCanvas({
   const userMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const clickRef = useRef(onClickLngLat);
   const moveRef = useRef(onWaypointMove);
+  const loopJoinRef = useRef(onLoopJoinMove);
   const geometryRef = useRef(geometry);
   const originalRef = useRef(originalGeometry);
   const trailPartsRef = useRef(trailParts);
@@ -95,6 +100,7 @@ export function MapCanvas({
   useEffect(() => {
     clickRef.current = onClickLngLat;
     moveRef.current = onWaypointMove;
+    loopJoinRef.current = onLoopJoinMove;
     geometryRef.current = geometry;
     originalRef.current = originalGeometry;
     trailPartsRef.current = trailParts;
@@ -226,8 +232,11 @@ export function MapCanvas({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    const loop = Boolean(geometry && isClosedLoop(geometry.coordinates));
+    const pins =
+      loop ? waypoints.filter((wp) => wp.kind !== "end") : waypoints;
     markersRef.current.forEach((m) => m.remove());
-    markersRef.current = waypoints.map((wp, i) => {
+    markersRef.current = pins.map((wp, i) => {
       const el = document.createElement("button");
       el.type = "button";
       el.className = "ridgeline-marker";
@@ -238,16 +247,40 @@ export function MapCanvas({
         "aria-label",
         offTrail ? `${wp.label ?? wp.kind}, off trail` : (wp.label ?? wp.kind),
       );
-      const marker = new mapboxgl.Marker({ element: el, draggable: Boolean(moveRef.current) })
+      const draggable = Boolean(moveRef.current) || Boolean(loopJoinRef.current);
+      const marker = new mapboxgl.Marker({ element: el, draggable })
         .setLngLat([wp.lng, wp.lat])
         .addTo(map);
+      const isJoinPin = loop && (wp.kind === "start" || wp.kind === "end");
+      let frozen: LngLat[] | null = null;
+      if (isJoinPin) {
+        marker.on("dragstart", () => {
+          if (!loopJoinRef.current) return;
+          frozen = geometryRef.current?.coordinates.slice() ?? null;
+        });
+        marker.on("drag", () => {
+          if (!frozen || !loopJoinRef.current) return;
+          const raw = marker.getLngLat();
+          const hit = nearestPointOnLine(frozen, [raw.lng, raw.lat]);
+          if (hit) marker.setLngLat(hit.coord);
+        });
+      }
       marker.on("dragend", () => {
         const lngLat = marker.getLngLat();
+        if (isJoinPin && loopJoinRef.current && frozen) {
+          const hit = nearestPointOnLine(frozen, [lngLat.lng, lngLat.lat]);
+          const coord = hit?.coord ?? [lngLat.lng, lngLat.lat];
+          marker.setLngLat(coord);
+          loopJoinRef.current(coord[0], coord[1]);
+          frozen = null;
+          return;
+        }
+        frozen = null;
         moveRef.current?.(wp.id, lngLat.lng, lngLat.lat);
       });
       return marker;
     });
-  }, [waypoints]);
+  }, [waypoints, geometry]);
 
   useEffect(() => {
     const map = mapRef.current;
