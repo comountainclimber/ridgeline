@@ -1,4 +1,5 @@
 import {
+  index,
   jsonb,
   doublePrecision,
   integer,
@@ -39,7 +40,9 @@ export const routes = ridgeline.table("routes", {
   matchConfidence: doublePrecision("match_confidence"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("routes_owner_id_idx").on(table.ownerId),
+]);
 
 export const routeWaypoints = ridgeline.table("route_waypoints", {
   id: text("id").primaryKey(),
@@ -51,7 +54,9 @@ export const routeWaypoints = ridgeline.table("route_waypoints", {
   lat: doublePrecision("lat").notNull(),
   label: text("label"),
   kind: text("kind").notNull().default("via"),
-});
+}, (table) => [
+  index("route_waypoints_route_id_idx").on(table.routeId),
+]);
 
 export const magicLinks = ridgeline.table("magic_links", {
   id: text("id").primaryKey(),
@@ -61,7 +66,10 @@ export const magicLinks = ridgeline.table("magic_links", {
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
   guestUserId: text("guest_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("magic_links_email_created_at_idx").on(table.email, table.createdAt),
+  index("magic_links_guest_user_id_idx").on(table.guestUserId),
+]);
 
 export const gpxAssets = ridgeline.table("gpx_assets", {
   id: text("id").primaryKey(),
@@ -73,4 +81,6 @@ export const gpxAssets = ridgeline.table("gpx_assets", {
   kind: text("kind").notNull(),
   content: text("content"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("gpx_assets_route_id_idx").on(table.routeId),
+]);

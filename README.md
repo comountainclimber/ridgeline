@@ -4,7 +4,7 @@ Mapping for mountain athletes. Plan a line, snap it to real trails and roads, re
 
 ## Stack
 
-Next.js · Vercel · Neon (schema `ridgeline`) · Mapbox
+Next.js · Vercel · a dedicated Neon database (schema `ridgeline`) · Mapbox
 
 ## Local
 
@@ -14,9 +14,10 @@ cp .env.example .env.local
 # add RESEND_API_KEY (and RESEND_FROM_EMAIL once the sending domain is verified)
 # production: NEXT_PUBLIC_APP_URL=https://ridgeline.highaltitude.solutions (magic-link emails)
 npm install
-npm run db:push
 npm run dev
 ```
+
+`DATABASE_URL` must be Ridgeline's own database. Apply [`schema.sql`](schema.sql) to that empty database before `npm run db:push`. Do not point this app at the Whetstone database.
 
 Open [http://localhost:3000](http://localhost:3000).
 
